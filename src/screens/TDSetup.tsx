@@ -546,7 +546,7 @@ const regCountsFor = (csv: string, cfg: RegCfg, schools: string[]) => {
   const p = readRegSheet(csv, cfg.map);
   const u: Upload = { text: csv, source: '', map: p.map, fix: cfg.fix ?? {}, ok: true };
   const fix = schoolFix(u, schools);
-  return { p, fix, counts: regTotals(p.rows, fix) };
+  return { p, fix, counts: regTotals(p.rows, fix, schools) };
 };
 
 /** Sheet → app: coach list, coach check-in boxes, and (during check-in only) "no coach checked in = school not here". */
@@ -613,7 +613,7 @@ function RegSheet({ s, toast }: { s: TournamentState; toast: Toast }) {
   }, [t.id]);
 
   const parsed = u ? readRegSheet(u.text, u.map) : null;
-  const counts = u && parsed && !parsed.missing.length ? regTotals(parsed.rows, schoolFix(u, s.schools)) : {};
+  const counts = u && parsed && !parsed.missing.length ? regTotals(parsed.rows, schoolFix(u, s.schools), s.schools) : {};
   const matched = Object.entries(counts).filter(([k]) => s.schools.includes(k)).sort();
   const live = t.reg_counts ? Object.values(t.reg_counts).reduce((a, b) => a + b, 0) : 0;
 

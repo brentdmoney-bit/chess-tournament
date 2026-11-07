@@ -189,7 +189,7 @@ export function closestSchool(name: string, schools: string[]): string | null {
     const score = (2 * both) / Math.max(1, k.length - 1 + sk.length - 1);
     if (score > top) { top = score; best = s; }
   }
-  return top >= 0.6 ? best : null;
+  return top >= 0.7 ? best : null; // 0.6 matched HALLIDAY to HALL
 }
 
 /* ── Registration sheet: registered count per school ───────────────────── */
@@ -248,8 +248,8 @@ export function schoolsNotHere(rows: RegRow[], fix: (s: string) => string, schoo
 }
 
 /** Sum counts per school after mapping sheet names to roster names. */
-export function regTotals(rows: { school: string; n: number }[], fix: (s: string) => string) {
+export function regTotals(rows: { school: string; n: number }[], fix: (s: string) => string, onlySchools?: string[]) {
   const out: Record<string, number> = {};
-  for (const r of rows) { const k = fix(r.school); out[k] = (out[k] ?? 0) + r.n; }
+  for (const r of rows) { const k = fix(r.school); if (!onlySchools || onlySchools.includes(k)) out[k] = (out[k] ?? 0) + r.n; }
   return out;
 }

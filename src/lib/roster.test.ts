@@ -105,3 +105,8 @@ test('check-in sheet: coaches, counts, schools not here', () => {
   assert.deepEqual(regTotals(p.rows, fix), { ALEXANDER: 8, BAYLES: 14, '61': 667 });
   assert.deepEqual(schoolsNotHere(p.rows, fix, ['ALEXANDER', 'BAYLES']), ['BAYLES']);
 });
+
+test('near-miss guard and roster-only totals', () => {
+  assert.equal(closestSchool('HALLIDAY', ['HALL', 'HAWTHORNE']), null);
+  assert.deepEqual(regTotals([{ school: 'ALEXANDER', n: 8 }, { school: '61', n: 667 }], (x) => x, ['ALEXANDER']), { ALEXANDER: 8 });
+});
