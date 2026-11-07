@@ -552,10 +552,28 @@ const regCountsFor = (csv: string, cfg: RegCfg, schools: string[]) => {
 /** Sheet → app: coach list, coach check-in boxes, and (during check-in only) "no coach checked in = school not here". */
 async function applyCheckIn(rows: RegRow[], fix: (s: string) => string, tid: string, schools: string[]) {
   const sheet = rows.filter((r) => r.email);
+  const { data: have } = rows.some((r) => r.email || r.coach)
+    ? await supabase.from('coaches').select('id,email,name,phone,school,checked_in_at').eq('tournament_id', tid)
+    : { data: [] };
+  const now = new Date().toISOString();
+  const stamp = (r: RegRow, prev: string | null | undefined) => (r.checked === undefined ? prev ?? null : r.checked ? prev ?? now : null);
+
+  // Coaches with no email on the sheet: matched by name + school. They show on Attendance but can't sign in.
+  const key = (name: string, school: string) => `${name.toLowerCase()}|${school}`;
+  const byName = new Map((have ?? []).filter((c) => !c.email).map((c) => [key(c.name, c.school), c]));
+  const named = new Map<string, RegRow>();
+  for (const r of rows) if (!r.email && r.coach) named.set(key(r.coach, fix(r.school)), r);
+  const add = [...named].filter(([k]) => !byName.has(k)).map(([, r]) => ({ tournament_id: tid, name: r.coach!, phone: r.phone ?? null, school: fix(r.school), checked_in_at: stamp(r, null) }));
+  if (add.length) await must(supabase.from('coaches').insert(add));
+  for (const [k, r] of named) {
+    const c = byName.get(k);
+    if (c && (!c.checked_in_at !== !stamp(r, c.checked_in_at) || (r.phone ?? null) !== c.phone)) {
+      await must(supabase.from('coaches').update({ checked_in_at: stamp(r, c.checked_in_at), phone: r.phone ?? null }).eq('id', c.id));
+    }
+  }
+
   if (sheet.length) {
-    const { data: have } = await supabase.from('coaches').select('email,name,phone,school,checked_in_at').eq('tournament_id', tid);
-    const byEmail = new Map((have ?? []).map((c) => [c.email as string, c]));
-    const now = new Date().toISOString();
+    const byEmail = new Map((have ?? []).filter((c) => c.email).map((c) => [c.email as string, c]));
     const seen = new Set<string>();
     const up = sheet.filter((r) => !seen.has(r.email!) && !!seen.add(r.email!)).map((r) => {
       const c = byEmail.get(r.email!);
