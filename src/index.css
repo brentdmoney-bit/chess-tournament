@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Theme tokens. Dark is the default; light flips via [data-theme="light"] on <html>. */
+:root {
+  --bg: #0a0d14;
+  --panel: #111723;
+  --panel-2: #182032;
+  --line: #243049;
+  --ink: #e8ebf2;
+  --mute: #8f9ab0;
+  --gold: #e0b43a;
+  --gold-ink: #1a1405;
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --blue: #60a5fa;
+  --purple: #c084fc;
+  --orange: #fb923c;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f4f5f8;
+  --panel: #ffffff;
+  --panel-2: #eef1f6;
+  --line: #d9dee8;
+  --ink: #141824;
+  --mute: #5b6578;
+  --gold: #a87b0c;
+  --gold-ink: #ffffff;
+  --green: #059669;
+  --red: #dc2626;
+  --amber: #b45309;
+  --blue: #2563eb;
+  --purple: #7c3aed;
+  --orange: #c2410c;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-mute: var(--mute);
+  --color-gold: var(--gold);
+  --color-gold-ink: var(--gold-ink);
+  --color-good: var(--green);
+  --color-bad: var(--red);
+  --color-warn: var(--amber);
+  --color-info: var(--blue);
+  --color-sa: var(--purple);
+  --color-admin: var(--orange);
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-display: Cinzel, Georgia, serif;
+}
+
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button:not(:disabled) { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* 16px inputs stop iOS from zooming in on focus. */
+input, select, textarea { font-size: 16px; }
+.scroll-x { overflow-x: auto; scrollbar-width: none; }
+.scroll-x::-webkit-scrollbar { display: none; }
