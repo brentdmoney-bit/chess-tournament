@@ -364,7 +364,7 @@ export function Attendance({ s, canEdit, toast }: { s: TournamentState; canEdit:
         <Stat label="Registered" value={tot.reg || '—'} tone={tot.reg && tot.reg !== tot.present ? 'warn' : undefined} />
       </div>
       <Card>
-        <Table head={['School', 'Coaches', 'Registered', 'Roster', 'Competing', 'Gap']}>
+        <Table scroll head={['School', 'Coaches', 'Registered', 'Roster', 'Competing', 'Gap']}>
           {rows.map((r) => {
             const gap = r.reg == null ? null : r.reg - r.present;
             const first = r.coaches[0];

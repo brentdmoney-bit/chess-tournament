@@ -157,11 +157,12 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-mute">{children}</div>;
 }
 
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+/** `scroll`: the table scrolls inside its own box with the header row pinned, so whatever sits above it stays on screen. */
+export function Table({ head, children, scroll }: { head: ReactNode[]; children: ReactNode; scroll?: boolean }) {
   return (
-    <div className="-mx-4 overflow-x-auto sm:mx-0">
+    <div className={cx('-mx-4 overflow-x-auto sm:mx-0', scroll && 'max-h-[calc(100dvh-22rem)] min-h-72 overflow-y-auto')}>
       <table className="w-full min-w-max text-sm">
-        <thead><tr className="border-b border-line text-left text-xs uppercase tracking-wider text-mute">{head.map((h, i) => <th key={i} className="px-3 py-2 font-semibold">{h}</th>)}</tr></thead>
+        <thead><tr className="border-b border-line text-left text-xs uppercase tracking-wider text-mute">{head.map((h, i) => <th key={i} className={cx('px-3 py-2 font-semibold', scroll && 'sticky top-0 z-10 bg-panel shadow-[0_1px_0_var(--line)]')}>{h}</th>)}</tr></thead>
         <tbody className="divide-y divide-line">{children}</tbody>
       </table>
     </div>
