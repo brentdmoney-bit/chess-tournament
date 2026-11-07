@@ -494,6 +494,13 @@ export function Settings({ s, toast }: { s: TournamentState; toast: Toast }) {
               hint="After this, coaches can't mark attendance or add subs (they can still withdraw). The server enforces it." />
           </div>
         </Card>
+        <Card title="T-shirt orders">
+          <p className="mb-3 text-sm text-mute">{t.shirts_open ? 'Open: coaches can pick and change sizes.' : 'Closed: sizes are locked. Only you can change them.'}</p>
+          <Btn tone={t.shirts_open ? 'bad' : 'good'} disabled={busy === 'shirts'}
+            onClick={() => run('shirts', () => must(supabase.from('tournaments').update({ shirts_open: !t.shirts_open }).eq('id', t.id)), t.shirts_open ? 'T-shirt orders closed' : 'T-shirt orders open')}>
+            {t.shirts_open ? 'Close T-shirt orders' : 'Reopen T-shirt orders'}
+          </Btn>
+        </Card>
         <RegSheet s={s} toast={toast} />
         <Card title="Grades playing">
           <div className="flex flex-wrap gap-2">

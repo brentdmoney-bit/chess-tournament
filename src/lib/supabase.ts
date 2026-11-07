@@ -18,12 +18,19 @@ export interface Tournament {
   checkin_cutoff: string | null; active_grades: number[]; award_tiers: AwardTier[];
   team_top_n: number; ended: boolean;
   reg_counts: Record<string, number> | null; reg_synced_at: string | null; // from the registration sheet sync
+  shirts_open: boolean;
 }
 export interface Coach {
   id: string; name: string; email: string | null; phone: string | null; school: string;
-  checked_in_at: string | null; registered_count: number | null; approved: boolean;
+  checked_in_at: string | null; registered_count: number | null; approved: boolean; shirt_size: string | null;
 }
-export interface DbPlayer extends Player { tournament_id: string }
+export interface DbPlayer extends Player { tournament_id: string; shirt_size: string | null }
+
+/** T-shirt sizes, smallest first. Codes match the database check constraint. */
+export const SHIRT_SIZES: [code: string, label: string][] = [
+  ['YS', 'Youth S'], ['YM', 'Youth M'], ['YL', 'Youth L'], ['S', 'Adult S'], ['M', 'Adult M'],
+  ['L', 'Adult L'], ['XL', 'Adult XL'], ['2XL', 'Adult 2XL'], ['3XL', 'Adult 3XL'],
+];
 export interface DbGame extends Game { id: string; scored_at: string | null; scored_by: string | null }
 export interface HelpRequest { id: string; round: number; board: number; note: string | null; requested_name: string | null; resolved_at: string | null; created_at: string }
 export interface Message { id: string; user_id: string; sender_name: string; role: Role; body: string; created_at: string }

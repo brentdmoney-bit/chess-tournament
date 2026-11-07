@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, rpc, type Tournament, type Coach, type DbPlayer, type DbGame, type HelpRequest, type Message, type Notice, type AccessRequest, type Role } from './supabase.ts';
 
-const PLAYER_COLS = 'id,tournament_id,first_name,last_name,grade,school,coach_name,status,is_sub,created_at';
+const PLAYER_COLS = 'id,tournament_id,first_name,last_name,grade,school,coach_name,status,is_sub,created_at,shirt_size';
 type Table = 'tournaments' | 'players' | 'coaches' | 'games' | 'help_requests' | 'messages' | 'notices' | 'access_requests';
 
 /**

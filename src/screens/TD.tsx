@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ordinal, pairRound } from '../lib/chess.ts';
 import { supabase, rpc, must, type Profile } from '../lib/supabase.ts';
 import { useTournament, type TournamentState } from '../lib/useTournament.ts';
-import { Attendance, Awards, Chat, PairingsTable, Progress, Results, StandingsView } from '../panels.tsx';
+import { Attendance, Awards, Chat, PairingsTable, Progress, Results, Shirts, StandingsView } from '../panels.tsx';
 import { Overview } from './SA.tsx';
 import { Access, CreateTournament, Players, Scorers, Settings, useRegSync } from './TDSetup.tsx';
 import { Badge, Btn, Card, Empty, ErrorBar, H1, Shell, Stat, cx, useAction, useToast } from '../ui.tsx';
@@ -31,6 +31,7 @@ export default function TD({ profile, onSignOut }: { profile: Profile; onSignOut
     { id: 'access', label: 'Access', badge: pendingAccess },
     { id: 'scorers', label: 'Scorers' },
     { id: 'awards', label: 'Awards' },
+    { id: 'shirts', label: 'T-shirts' },
     { id: 'settings', label: 'Settings' },
   ];
 
@@ -49,6 +50,7 @@ export default function TD({ profile, onSignOut }: { profile: Profile; onSignOut
           {tab === 'access' && <Access s={s} toast={toast} />}
           {tab === 'scorers' && <Scorers s={s} toast={toast} />}
           {tab === 'awards' && <Awards s={s} canEdit toast={toast} />}
+          {tab === 'shirts' && <Shirts s={s} />}
           {tab === 'settings' && <Settings s={s} toast={toast} />}
         </>
       )}

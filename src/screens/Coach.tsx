@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { fullName, ordinal } from '../lib/chess.ts';
-import { rpc, time, type Profile, type DbPlayer } from '../lib/supabase.ts';
+import { rpc, time, SHIRT_SIZES, type Profile, type DbPlayer } from '../lib/supabase.ts';
 import { useTournament } from '../lib/useTournament.ts';
 import { PairingsTable, StandingsView, outcomeFor, nameOf, useScorecard } from '../panels.tsx';
 import { Badge, Btn, Card, Empty, ErrorBar, Field, H1, Select, Shell, cx, useAction, useToast } from '../ui.tsx';
@@ -22,6 +22,8 @@ export default function Coach({ profile, onSignOut }: { profile: Profile; onSign
   const notices = s.notices.filter((n) => !n.dismissed_at);
   const present = mine.filter((p) => p.status === 'present').length;
   const unmarked = mine.filter((p) => p.status === 'registered').length;
+  const shirtKids = mine.filter((p) => p.status !== 'withdrawn');
+  const noShirt = shirtKids.filter((p) => !p.shirt_size).length + (me && !me.shirt_size ? 1 : 0);
 
   const setStatus = (p: DbPlayer, status: string) => run(p.id, () => rpc('coach_set_status', { p_player: p.id, p_status: status }));
   const withdraw = (p: DbPlayer) => {
@@ -30,7 +32,7 @@ export default function Coach({ profile, onSignOut }: { profile: Profile; onSign
 
   return (
     <Shell role="Coach" who={`${profile.display_name ?? 'Coach'} · ${school}`} t={t} onSignOut={onSignOut} tab={tab} setTab={setTab}
-      tabs={[{ id: 'checkin', label: 'My players', badge: checkinOpen ? unmarked : 0 }, { id: 'pairings', label: 'Pairings' }, { id: 'history', label: 'Results' }, { id: 'standings', label: 'Standings' }]}>
+      tabs={[{ id: 'checkin', label: 'My players', badge: checkinOpen ? unmarked : 0 }, { id: 'pairings', label: 'Pairings' }, { id: 'history', label: 'Results' }, { id: 'standings', label: 'Standings' }, { id: 'shirts', label: 'T-shirts', badge: t?.shirts_open ? noShirt : 0 }]}>
       <ErrorBar error={s.error} onClose={() => s.setError(null)} />
       {notices.map((n) => (
         <div key={n.id} className="mb-3 flex items-start gap-3 rounded-xl border border-bad/40 bg-bad/10 p-3 text-sm">
@@ -131,9 +133,34 @@ export default function Coach({ profile, onSignOut }: { profile: Profile; onSign
             </div>
           )}
         </>
+      ) : tab === 'shirts' ? (
+        <>
+          <H1 sub={t.shirts_open ? 'Pick a T-shirt size for each student and for yourself. Each pick saves right away.' : 'T-shirt orders are closed. Ask the Tournament Director to change a size.'}>T-shirts</H1>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Badge tone={noShirt ? 'warn' : 'good'}>{noShirt ? `${noShirt} still need a size` : 'Everyone has a size'}</Badge>
+          </div>
+          <div className="space-y-2">
+            {me && <ShirtRow label={`You (${me.name})`} sub="Coach" value={me.shirt_size} disabled={!t.shirts_open || busy === 'myshirt'}
+              onPick={(v) => run('myshirt', () => rpc('set_my_shirt', { p_size: v || null }))} />}
+            {shirtKids.map((p) => <ShirtRow key={p.id} label={fullName(p)} sub={`${ordinal(p.grade)} grade`} value={p.shirt_size} disabled={!t.shirts_open || busy === `shirt-${p.id}`}
+              onPick={(v) => run(`shirt-${p.id}`, () => rpc('set_shirt', { p_player: p.id, p_size: v || null }))} />)}
+          </div>
+        </>
       ) : <StandingsView s={s} school={school} />}
       {card.node}
       {node}
     </Shell>
+  );
+}
+
+function ShirtRow({ label, sub, value, disabled, onPick }: { label: string; sub: string; value: string | null; disabled: boolean; onPick: (size: string) => void }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-panel p-3">
+      <div className="min-w-0 flex-1"><div className="font-medium">{label}</div><div className="text-xs text-mute">{sub}</div></div>
+      <Select value={value ?? ''} disabled={disabled} className={cx('w-36', !value && 'border-warn')} onChange={(e) => onPick(e.target.value)}>
+        <option value="">Pick size</option>
+        {SHIRT_SIZES.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+      </Select>
+    </div>
   );
 }

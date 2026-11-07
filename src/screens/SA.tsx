@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { fmtScore, fullName, ordinal } from '../lib/chess.ts';
 import type { Profile } from '../lib/supabase.ts';
 import { useTournament, type TournamentState } from '../lib/useTournament.ts';
-import { Attendance, Awards, Chat, PairingsTable, Progress, Results, StandingsView, useStandings } from '../panels.tsx';
+import { Attendance, Awards, Chat, PairingsTable, Progress, Results, Shirts, StandingsView, useStandings } from '../panels.tsx';
 import { Badge, Card, Empty, ErrorBar, H1, Shell, Stat, Table, Td, useToast } from '../ui.tsx';
 
 /** Student Activities: read-only view of everything, plus staff chat. */
@@ -11,11 +11,11 @@ export default function SA({ profile, onSignOut }: { profile: Profile; onSignOut
   const { toast, node } = useToast();
   const [tab, setTab] = useState('overview');
   const t = s.t;
-  const tabs = ['overview', 'attendance', 'rosters', 'pairings', 'results', 'standings', 'awards'];
+  const tabs = ['overview', 'attendance', 'rosters', 'pairings', 'results', 'standings', 'awards', 'shirts'];
 
   return (
     <Shell role="SA" who={profile.display_name ?? 'Student Activities'} t={t} onSignOut={onSignOut} tab={tab} setTab={setTab}
-      tabs={tabs.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }))}>
+      tabs={tabs.map((id) => ({ id, label: id === 'shirts' ? 'T-shirts' : id[0].toUpperCase() + id.slice(1) }))}>
       <ErrorBar error={s.error} onClose={() => s.setError(null)} />
       <div className="mb-4 rounded-xl border border-sa/40 bg-sa/10 px-3 py-2 text-center text-xs font-semibold text-sa">View only</div>
       {!s.loaded ? null : !t ? <Empty>No tournament is running.</Empty> : (
@@ -27,6 +27,7 @@ export default function SA({ profile, onSignOut }: { profile: Profile; onSignOut
           {tab === 'results' && <Results s={s} canEdit={false} toast={toast} />}
           {tab === 'standings' && <StandingsView s={s} />}
           {tab === 'awards' && <Awards s={s} canEdit={false} toast={toast} />}
+          {tab === 'shirts' && <Shirts s={s} />}
         </>
       )}
       <Chat s={s} profile={profile} />

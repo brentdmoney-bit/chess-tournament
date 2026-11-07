@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RESULT_LABEL, awardFor, fmtScore, fullName, ordinal, points, standings, teamStandings, type Result, type AwardTier } from './lib/chess.ts';
-import { supabase, rpc, must, time, type DbGame, type DbPlayer, type Role, type Profile } from './lib/supabase.ts';
+import { supabase, rpc, must, time, SHIRT_SIZES, type DbGame, type DbPlayer, type Role, type Profile } from './lib/supabase.ts';
 import type { TournamentState } from './lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, Field, H1, Select, Stat, Table, Td, cx, useAction } from './ui.tsx';
 
@@ -470,4 +470,69 @@ export function outcomeFor(g: DbGame, playerId: string): { label: string; tone: 
   if (mine === 1) return { label: ff ? 'Win (forfeit)' : 'Win', tone: 'good' };
   if (mine === 0.5) return { label: 'Draw', tone: 'info' };
   return { label: ff ? 'Loss (forfeit)' : 'Loss', tone: 'bad' };
+}
+
+/* ── T-shirt order totals (Student Activities, TD) ─────────────────────── */
+export function Shirts({ s }: { s: TournamentState }) {
+  const kids = s.players.filter((p) => p.status !== 'withdrawn');
+  const coaches = s.coaches.filter((c) => c.approved);
+  const tally = (rows: { shirt_size: string | null }[]) => SHIRT_SIZES.map(([c]) => rows.filter((r) => r.shirt_size === c).length);
+  const kidT = tally(kids), coachT = tally(coaches);
+  const bySchool = s.schools.map((school) => {
+    const all = [...kids.filter((p) => p.school === school), ...coaches.filter((c) => c.school === school)];
+    const t = tally(all);
+    return { school, t, total: t.reduce((a, b) => a + b, 0), missing: all.filter((r) => !r.shirt_size).length };
+  });
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+  const grand = kidT.map((n, i) => n + coachT[i]);
+
+  const download = () => {
+    const cell = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const lines = [
+      ['School', ...SHIRT_SIZES.map(([, l]) => l), 'Total', 'Not picked yet'],
+      ...bySchool.map((r) => [r.school, ...r.t, r.total, r.missing]),
+      ['ALL SCHOOLS', ...grand, sum(grand), sum(bySchool.map((r) => r.missing))],
+    ];
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.map((l) => l.map(cell).join(',')).join('\n')], { type: 'text/csv' }));
+    a.download = `tshirt-order-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  return (
+    <>
+      <H1 sub={`Coaches pick sizes for their students and themselves. Orders are ${s.t?.shirts_open ? 'open' : 'closed'}.`}
+        action={<Btn tone="gold" onClick={download}>Download CSV</Btn>}>T-shirts</H1>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Total shirts" value={sum(grand)} />
+        <Stat label="Students" value={sum(kidT)} sub={`of ${kids.length} picked`} />
+        <Stat label="Coaches" value={sum(coachT)} sub={`of ${coaches.length} picked`} />
+        <Stat label="Not picked yet" value={kids.length + coaches.length - sum(grand)} tone={kids.length + coaches.length - sum(grand) ? 'warn' : 'good'} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[18rem_1fr]">
+        <Card title="By size">
+          <Table head={['Size', 'Students', 'Coaches', 'Total']}>
+            {SHIRT_SIZES.map(([c, l], i) => (
+              <tr key={c}><Td>{l}</Td><Td>{kidT[i]}</Td><Td>{coachT[i]}</Td><Td className="font-semibold">{grand[i]}</Td></tr>
+            ))}
+          </Table>
+        </Card>
+        <Card title="By school">
+          <div className="overflow-x-auto">
+            <Table head={['School', ...SHIRT_SIZES.map(([c]) => c), 'Total', 'Not picked']}>
+              {bySchool.map((r) => (
+                <tr key={r.school}>
+                  <Td className="font-medium">{r.school}</Td>
+                  {r.t.map((n, i) => <Td key={i} className={n ? '' : 'text-mute'}>{n || '·'}</Td>)}
+                  <Td className="font-semibold">{r.total}</Td>
+                  <Td>{r.missing ? <Badge tone="warn">{r.missing}</Badge> : <Badge tone="good">0</Badge>}</Td>
+                </tr>
+              ))}
+            </Table>
+          </div>
+        </Card>
+      </div>
+    </>
+  );
 }
