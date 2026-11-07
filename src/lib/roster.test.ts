@@ -1,6 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, readRoster, coachesFrom, splitName } from './roster.ts';
+import { parseCsv, readRoster, readCoaches, coachesFrom, splitName } from './roster.ts';
+
+test('coach list CSV', () => {
+  const csv = [
+    'Coach,Cell,Email,Campus',
+    '"SMITH, PAT",214-555-0100,PSmith@Example.org,"001 - Sample High School"',
+    'Lee Ann,,lee@example.org,North',
+    'No Mail,214-555-0101,,North',
+    'Dup,,psmith@example.org,North',
+  ].join('\n');
+  const { rows, problems, missing } = readCoaches(csv);
+  assert.deepEqual(missing, []);
+  assert.deepEqual(rows, [
+    { name: 'Pat Smith', email: 'psmith@example.org', phone: '214-555-0100', school: 'Sample High School' },
+    { name: 'Lee Ann', email: 'lee@example.org', phone: null, school: 'North' },
+  ]);
+  assert.equal(problems.length, 2);
+  assert.deepEqual(readCoaches('Name,Phone\nx,1').missing, ['email', 'school']);
+});
 
 test('quoted commas and doubled quotes', () => {
   assert.deepEqual(parseCsv('a,"b, c","say ""hi"""\r\n1,2,3'), [['a', 'b, c', 'say "hi"'], ['1', '2', '3']]);

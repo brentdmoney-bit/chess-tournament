@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { fullName, ordinal } from '../lib/chess.ts';
-import { coachesFrom, readRoster, type RosterRow } from '../lib/roster.ts';
+import { coachesFrom, readCoaches, readRoster, type CoachRow, type RosterRow } from '../lib/roster.ts';
 import { supabase, rpc, must, time, type Profile, type Role } from '../lib/supabase.ts';
 import type { TournamentState } from '../lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, Field, H1, Select, Shell, Table, Td, cx, useAction, useToast } from '../ui.tsx';
@@ -74,13 +74,11 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
 
   const commit = () => preview && run('import', async () => {
     const rows = preview.rows.map((r) => ({
-      tournament_id: t.id, student_id: r.student_id, first_name: r.first_name, last_name: r.last_name,
+      student_id: r.student_id, first_name: r.first_name, last_name: r.last_name,
       grade: r.grade, school: r.school, coach_name: r.coach_name,
     }));
-    // Upsert on student ID so re-importing an updated sheet never duplicates or wipes check-in status.
-    const withId = rows.filter((r) => r.student_id), noId = rows.filter((r) => !r.student_id);
-    if (withId.length) await must(supabase.from('players').upsert(withId, { onConflict: 'tournament_id,student_id' }));
-    if (noId.length) await must(supabase.from('players').insert(noId));
+    // Server upserts on student ID so re-importing never duplicates or wipes check-in status.
+    await rpc('import_players', { p_rows: rows });
     const withEmail = coachesFrom(preview.rows).filter((c) => c.email).map((c) => ({ ...c, tournament_id: t.id }));
     if (withEmail.length) await must(supabase.from('coaches').upsert(withEmail, { onConflict: 'tournament_id,email' }));
     const grades = [...new Set([...t.active_grades, ...rows.map((r) => r.grade)])].sort((a, b) => a - b);
@@ -199,6 +197,7 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
   const [inv, setInv] = useState({ email: '', role: 'Admin' as Role });
   const [coach, setCoach] = useState({ name: '', email: '', phone: '', school: '' });
   const [schoolFor, setSchoolFor] = useState<Record<string, string>>({});
+  const [coachCsv, setCoachCsv] = useState<{ rows: CoachRow[]; problems: string[]; source: string } | null>(null);
 
   const reload = async () => {
     const [p, i] = await Promise.all([
@@ -297,6 +296,43 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
               await must(supabase.from('coaches').upsert({ tournament_id: t.id, name: coach.name.trim(), email: coach.email.trim().toLowerCase(), phone: coach.phone.trim() || null, school: coach.school.trim() }, { onConflict: 'tournament_id,email' }));
               setCoach({ name: '', email: '', phone: '', school: '' });
             }, 'Coach added')}>Add coach</Btn>
+
+          <div className="mt-4 border-t border-line pt-4">
+            <p className="mb-2 text-sm text-mute">Or upload the coach list as a CSV: name, cell, email, school. Re-uploading updates coaches by email.</p>
+            <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-dashed border-line text-sm font-semibold text-mute hover:border-gold">
+              Choose coach CSV
+              <input type="file" accept=".csv,.txt,text/csv" className="hidden" onChange={async (e) => {
+                const f = e.target.files?.[0]; e.target.value = '';
+                if (!f) return;
+                const r = readCoaches(await f.text());
+                if (r.missing.length) return toast(`That file is missing: ${r.missing.join(', ')}.`, true);
+                setCoachCsv({ rows: r.rows, problems: r.problems, source: f.name });
+              }} />
+            </label>
+            {coachCsv && (() => {
+              const unknown = s.schools.length ? [...new Set(coachCsv.rows.map((c) => c.school))].filter((x) => !s.schools.includes(x)) : [];
+              return (
+                <div className="mt-3 rounded-xl border border-gold/40 p-3 text-sm">
+                  <p><b>{coachCsv.rows.length}</b> coaches from {coachCsv.source}.</p>
+                  {unknown.length > 0 && <p className="mt-1 text-warn">No students at: {unknown.join(', ')}. Fix the spelling to match the student roster, or those coaches won't see any kids.</p>}
+                  {coachCsv.problems.length > 0 && (
+                    <details className="mt-1 text-warn"><summary>{coachCsv.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{coachCsv.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
+                  )}
+                  <div className="mt-2 max-h-40 overflow-y-auto text-xs text-mute">
+                    {coachCsv.rows.slice(0, 8).map((c) => <div key={c.email}>{c.name} · {c.school} · {c.phone ?? 'no cell'}</div>)}
+                    {coachCsv.rows.length > 8 && <div>…and {coachCsv.rows.length - 8} more</div>}
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Btn tone="gold" disabled={busy === 'coachcsv' || !coachCsv.rows.length} onClick={() => run('coachcsv', async () => {
+                      await must(supabase.from('coaches').upsert(coachCsv.rows.map((c) => ({ ...c, tournament_id: t.id })), { onConflict: 'tournament_id,email' }));
+                      setCoachCsv(null);
+                    }, `Saved ${coachCsv.rows.length} coaches`)}>{busy === 'coachcsv' ? 'Saving…' : 'Save coaches'}</Btn>
+                    <Btn onClick={() => setCoachCsv(null)}>Cancel</Btn>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </Card>
       </div>
     </>

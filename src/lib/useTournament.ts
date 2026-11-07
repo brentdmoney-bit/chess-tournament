@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, type Tournament, type Coach, type DbPlayer, type DbGame, type HelpRequest, type Message, type Notice, type AccessRequest, type Role } from './supabase.ts';
+import { supabase, rpc, type Tournament, type Coach, type DbPlayer, type DbGame, type HelpRequest, type Message, type Notice, type AccessRequest, type Role } from './supabase.ts';
 
+const PLAYER_COLS = 'id,tournament_id,first_name,last_name,grade,school,coach_name,status,is_sub,created_at';
 type Table = 'tournaments' | 'players' | 'coaches' | 'games' | 'help_requests' | 'messages' | 'notices' | 'access_requests';
 
 /**
@@ -29,7 +30,16 @@ export function useTournament(role: Role) {
           const { data, error } = await supabase.from('tournaments').select('*').eq('id', tid).single();
           if (error) throw error; setT(data); return;
         }
-        case 'players': { const { data, error } = await q('players').order('last_name'); if (error) throw error; setPlayers(data); return; }
+        case 'players': {
+          // student_id isn't readable from the table (FERPA); the TD and a student's own coach get it from student_ids().
+          const { data, error } = await supabase.from('players').select(PLAYER_COLS).eq('tournament_id', tid).order('last_name');
+          if (error) throw error;
+          if (role === 'TD' || role === 'Coach') {
+            const ids = new Map((await rpc<{ id: string; student_id: string }[]>('student_ids')).map((x) => [x.id, x.student_id]));
+            setPlayers(data.map((p) => ({ ...p, student_id: ids.get(p.id) ?? null })) as DbPlayer[]);
+          } else setPlayers(data as DbPlayer[]);
+          return;
+        }
         case 'coaches': { const { data, error } = await q('coaches').order('school'); if (error) throw error; setCoaches(data); return; }
         case 'games': { const { data, error } = await q('games').order('round').order('board'); if (error) throw error; setGames(data); return; }
         case 'help_requests': {
