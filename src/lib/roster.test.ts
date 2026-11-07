@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, readRoster, readCoaches, coachesFrom, splitName, closestSchool, readRegSheet, regTotals } from './roster.ts';
+import { parseCsv, readRoster, readCoaches, coachesFrom, splitName, closestSchool, readRegSheet, regTotals, schoolsNotHere } from './roster.ts';
 
 test('coach list CSV', () => {
   const csv = [
@@ -83,10 +83,25 @@ test('loose header guesses and sample row', () => {
 
 test('registration sheet counts', () => {
   const perCoach = readRegSheet(['Coach,Campus,# Registered', 'A,001 - ALEXANDER,5', 'B,ALEXANDER,3', 'C,Bayles ES,x', 'D,,2'].join('\n'));
-  assert.deepEqual(perCoach.map, { school: 1, count: 2 });
+  assert.deepEqual(perCoach.map, { school: 1, count: 2, coach: 0 });
   assert.equal(perCoach.problems.length, 1);
   assert.deepEqual(regTotals(perCoach.rows, (x) => closestSchool(x, ['ALEXANDER', 'BAYLES']) ?? x), { ALEXANDER: 8 });
   const perStudent = readRegSheet(['Student,School', 'Ann,BAYLES', 'Bo,Bayles ES', 'Cy,ALEXANDER'].join('\n'));
   assert.equal(perStudent.map.count, undefined);
   assert.deepEqual(regTotals(perStudent.rows, (x) => closestSchool(x, ['ALEXANDER', 'BAYLES']) ?? x), { BAYLES: 2, ALEXANDER: 1 });
+});
+
+test('check-in sheet: coaches, counts, schools not here', () => {
+  const csv = ['Campus,Coach,Email,Checked in,#STU,#Shirt,Coach cell',
+    'ALEXANDER,"HERRERA, MARIO",MHerrera@example.org,TRUE,8,9,469-555-0170',
+    'ALEXANDER,"SMITH, ANN",asmith@example.org,FALSE,,1,',
+    'BAYLES ES,"CONDE, LORANE",lconde@example.org,FALSE,14,15,787-555-0100',
+    '61,,,FALSE,667,,'].join('\n');
+  const p = readRegSheet(csv);
+  assert.deepEqual(p.map, { school: 0, count: 4, coach: 1, email: 2, phone: 6, checked: 3 });
+  assert.deepEqual(p.rows[0], { school: 'ALEXANDER', n: 8, coach: 'Mario Herrera', email: 'mherrera@example.org', phone: '469-555-0170', checked: true });
+  assert.equal(p.rows[1].n, 0);
+  const fix = (x: string) => closestSchool(x, ['ALEXANDER', 'BAYLES']) ?? x;
+  assert.deepEqual(regTotals(p.rows, fix), { ALEXANDER: 8, BAYLES: 14, '61': 667 });
+  assert.deepEqual(schoolsNotHere(p.rows, fix, ['ALEXANDER', 'BAYLES']), ['BAYLES']);
 });

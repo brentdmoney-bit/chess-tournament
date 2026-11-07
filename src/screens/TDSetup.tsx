@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { fullName, ordinal } from '../lib/chess.ts';
-import { COACH_FIELDS, REG_FIELDS, ROSTER_FIELDS, closestSchool, coachesFrom, readCoaches, readRegSheet, readRoster, regTotals, type ColMap, type Field as CsvField } from '../lib/roster.ts';
+import { COACH_FIELDS, REG_FIELDS, ROSTER_FIELDS, closestSchool, coachesFrom, readCoaches, readRegSheet, readRoster, regTotals, schoolsNotHere, type ColMap, type Field as CsvField, type RegRow } from '../lib/roster.ts';
 import { supabase, rpc, must, time, type Profile, type Role } from '../lib/supabase.ts';
 import type { TournamentState } from '../lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, Field, H1, Select, Shell, Table, Td, cx, useAction, useToast } from '../ui.tsx';
@@ -545,8 +545,36 @@ type RegCfg = { url: string; map?: ColMap; fix?: Record<string, string> };
 const regCountsFor = (csv: string, cfg: RegCfg, schools: string[]) => {
   const p = readRegSheet(csv, cfg.map);
   const u: Upload = { text: csv, source: '', map: p.map, fix: cfg.fix ?? {}, ok: true };
-  return { p, counts: regTotals(p.rows, schoolFix(u, schools)) };
+  const fix = schoolFix(u, schools);
+  return { p, fix, counts: regTotals(p.rows, fix) };
 };
+
+/** Sheet → app: coach list, coach check-in boxes, and (during check-in only) "no coach checked in = school not here". */
+async function applyCheckIn(rows: RegRow[], fix: (s: string) => string, tid: string, schools: string[]) {
+  const sheet = rows.filter((r) => r.email);
+  if (sheet.length) {
+    const { data: have } = await supabase.from('coaches').select('email,name,phone,school,checked_in_at').eq('tournament_id', tid);
+    const byEmail = new Map((have ?? []).map((c) => [c.email as string, c]));
+    const now = new Date().toISOString();
+    const seen = new Set<string>();
+    const up = sheet.filter((r) => !seen.has(r.email!) && !!seen.add(r.email!)).map((r) => {
+      const c = byEmail.get(r.email!);
+      const checked_in_at = r.checked === undefined ? c?.checked_in_at ?? null : r.checked ? c?.checked_in_at ?? now : null;
+      return { tournament_id: tid, email: r.email!, name: r.coach || c?.name || r.email!, phone: r.phone ?? c?.phone ?? null, school: fix(r.school), checked_in_at };
+    }).filter((n) => {
+      const c = byEmail.get(n.email);
+      return !c || c.name !== n.name || c.phone !== n.phone || c.school !== n.school || !c.checked_in_at !== !n.checked_in_at;
+    });
+    if (up.length) await must(supabase.from('coaches').upsert(up, { onConflict: 'tournament_id,email' }));
+  }
+  if (rows.some((r) => r.checked !== undefined)) {
+    const { data: t } = await supabase.from('tournaments').select('current_round,round_phase').eq('id', tid).single();
+    if (t?.current_round === 1 && t.round_phase === 'setup') {
+      const away = schoolsNotHere(rows, fix, schools);
+      if (away.length) await must(supabase.from('players').update({ status: 'absent' }).eq('tournament_id', tid).in('school', away).in('status', ['registered', 'present']));
+    }
+  }
+}
 
 /** Runs on the TD screen: re-reads the registration sheet every minute and stores the counts everyone sees. */
 export function useRegSync(s: TournamentState) {
@@ -561,8 +589,10 @@ export function useRegSync(s: TournamentState) {
       const cfg = data?.reg_sheet as RegCfg | null;
       if (stop || !cfg?.url || !cfg.map) return; // not set up, or columns never confirmed
       try {
-        const { p, counts } = regCountsFor(await readSheet(cfg.url), cfg, schools);
-        if (!p.missing.length && !stop) await supabase.from('tournaments').update({ reg_counts: counts, reg_synced_at: new Date().toISOString() }).eq('id', tid);
+        const { p, fix, counts } = regCountsFor(await readSheet(cfg.url), cfg, schools);
+        if (p.missing.length || stop) return;
+        await supabase.from('tournaments').update({ reg_counts: counts, reg_synced_at: new Date().toISOString() }).eq('id', tid);
+        await applyCheckIn(p.rows, fix, tid, schools);
       } catch { /* sheet unreachable this minute: "last read" in Settings goes stale and the next tick retries */ }
     };
     void tick();
@@ -596,8 +626,9 @@ function RegSheet({ s, toast }: { s: TournamentState; toast: Toast }) {
     const next: RegCfg = { url: url.trim(), map: u.map, fix: u.fix };
     await must(supabase.from('tournament_secrets').update({ reg_sheet: next }).eq('tournament_id', t.id));
     await must(supabase.from('tournaments').update({ reg_counts: counts, reg_synced_at: new Date().toISOString() }).eq('id', t.id));
+    await applyCheckIn(parsed!.rows, schoolFix(u, s.schools), t.id, s.schools);
     setCfg(next); setU(null);
-  }, 'Saved. Registered counts now update every minute.');
+  }, 'Saved. The sheet now syncs every minute.');
   const stopSync = () => run('regstop', async () => {
     await must(supabase.from('tournament_secrets').update({ reg_sheet: null }).eq('tournament_id', t.id));
     await must(supabase.from('tournaments').update({ reg_counts: null, reg_synced_at: null }).eq('id', t.id));
@@ -633,6 +664,11 @@ function RegSheet({ s, toast }: { s: TournamentState; toast: Toast }) {
             <p className="mt-2 text-xs text-mute">
               {u.map.count === undefined ? 'Counting one row per student. ' : ''}
               {matched.length} schools, {matched.reduce((a, [, n]) => a + n, 0)} registered: {matched.slice(0, 6).map(([k, n]) => `${k} ${n}`).join(' · ')}{matched.length > 6 ? ' …' : ''}
+              {u.map.email !== undefined && <><br />{new Set(parsed.rows.filter((r) => r.email).map((r) => r.email)).size} coaches with an email{u.map.checked !== undefined ? `, ${parsed.rows.filter((r) => r.email && r.checked).length} checked in` : ''}. Coaches are added or updated by email.</>}
+              {u.map.checked !== undefined && (() => {
+                const away = schoolsNotHere(parsed.rows, schoolFix(u, s.schools), s.schools);
+                return <><br /><span className={away.length ? 'text-warn' : ''}>{away.length ? `No coach checked in: ${away.join(', ')}. Their students get marked absent during check-in.` : 'Every school on the sheet has a coach checked in.'}</span></>;
+              })()}
             </p>
           )}
           <div className="mt-3 flex gap-2">

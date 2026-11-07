@@ -196,33 +196,55 @@ export function closestSchool(name: string, schools: string[]): string | null {
 export const REG_FIELDS: Field[] = [
   { key: 'school', label: 'School' },
   { key: 'count', label: 'Registered count (not in file = count one row per student)' },
+  { key: 'coach', label: 'Coach name (optional)' },
+  { key: 'email', label: 'Coach email (optional)' },
+  { key: 'phone', label: 'Coach cell (optional)' },
+  { key: 'checked', label: 'Coach checked in, checkbox (optional)' },
 ];
 const REG_ALIASES: Record<string, string[]> = {
   school: ['school', 'campus', 'schoolname'],
-  count: ['registeredcount', 'registered', 'studentcount', 'numberofstudents', 'students', 'count', 'total', 'regd'],
+  count: ['registeredcount', 'registered', 'studentcount', 'numberofstudents', 'students', 'stu', 'count', 'total', 'regd'],
+  coach: ['coachname', 'coach', 'sponsor'],
+  email: ['coachemail', 'email', 'emailaddress'],
+  phone: ['coachcell', 'cell', 'phone', 'coachphone', 'coach'],
+  checked: ['checkedin', 'checked', 'here', 'arrived'],
 };
 
-/** Rows of {school as typed, count}. With no count column, each row counts as one student. */
-export function readRegSheet(text: string, map?: ColMap): Parsed<{ school: string; n: number }> {
+export interface RegRow { school: string; n: number; coach?: string; email?: string; phone?: string; checked?: boolean }
+
+/** Rows of {school as typed, count, coach info}. With no count column, each row counts as one student. */
+export function readRegSheet(text: string, map?: ColMap): Parsed<RegRow> {
   const grid = parseCsv(text);
   const headers = grid[0] ?? [];
   const col = map ?? guess(headers, REG_ALIASES);
   const base = { headers, sample: grid[1] ?? [], map: col };
   if (grid.length < 2) return { ...base, rows: [], problems: [], missing: ['a header row and at least one row'] };
   if (col.school === undefined) return { ...base, rows: [], problems: [], missing: ['school'] };
-  const rows: { school: string; n: number }[] = [];
+  const rows: RegRow[] = [];
   const problems: string[] = [];
+  const cell = (r: string[], k: string) => (col[k] === undefined ? '' : (r[col[k]!] ?? '').trim());
   grid.slice(1).forEach((r, i) => {
-    const school = (r[col.school!] ?? '').replace(/^\d+\s*-\s*/, '').trim();
+    const school = cell(r, 'school').replace(/^\d+\s*-\s*/, '');
     if (!school) return;
-    if (col.count === undefined) return rows.push({ school, n: 1 });
-    const raw = (r[col.count] ?? '').trim();
-    if (!raw) return;
-    const n = Number(raw);
+    const extra: Partial<RegRow> = {};
+    if (cell(r, 'coach')) extra.coach = splitName(cell(r, 'coach')).join(' ').trim();
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cell(r, 'email'))) extra.email = cell(r, 'email').toLowerCase();
+    if (cell(r, 'phone')) extra.phone = cell(r, 'phone');
+    if (col.checked !== undefined) extra.checked = /^(true|yes|y|x|✓|✔|1)$/i.test(cell(r, 'checked'));
+    if (col.count === undefined) return rows.push({ school, n: 1, ...extra });
+    const raw = cell(r, 'count');
+    const n = raw ? Number(raw) : 0; // blank count on a coach row = no students on that row
     if (!Number.isInteger(n) || n < 0) return problems.push(`Line ${i + 2}: count "${raw}" isn't a whole number`);
-    rows.push({ school, n });
+    rows.push({ school, n, ...extra });
   });
   return { ...base, rows, problems, missing: [] };
+}
+
+/** Roster schools the sheet lists where no coach row is checked in. Schools missing from the sheet aren't included. */
+export function schoolsNotHere(rows: RegRow[], fix: (s: string) => string, schools: string[]) {
+  const here = new Map<string, boolean>();
+  for (const r of rows) { const k = fix(r.school); here.set(k, (here.get(k) ?? false) || !!r.checked); }
+  return [...here].filter(([k, v]) => !v && schools.includes(k)).map(([k]) => k).sort();
 }
 
 /** Sum counts per school after mapping sheet names to roster names. */
