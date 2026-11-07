@@ -54,10 +54,15 @@ function guess(headers: string[], aliases: Record<string, string[]>): ColMap {
   const head = headers.map(norm);
   const col: ColMap = {};
   const used = new Set<number>();
-  for (const [key, names] of Object.entries(aliases)) {
-    for (const n of names) {
-      const i = head.findIndex((h, idx) => !used.has(idx) && h === n);
-      if (i >= 0) { col[key] = i; used.add(i); break; }
+  // Exact header first, then "header contains it" ("Cell Phone Number" → cell). The TD confirms either way.
+  for (const exact of [true, false]) {
+    for (const [key, names] of Object.entries(aliases)) {
+      if (col[key] !== undefined) continue;
+      for (const n of names) {
+        if (!exact && n.length < 4) continue;
+        const i = head.findIndex((h, idx) => !used.has(idx) && (exact ? h === n : h.includes(n)));
+        if (i >= 0) { col[key] = i; used.add(i); break; }
+      }
     }
   }
   return col;
@@ -76,21 +81,21 @@ export interface RosterRow {
   coach_name: string | null; coach_email: string | null; coach_phone: string | null;
 }
 
-export interface Parsed<R> { headers: string[]; map: ColMap; rows: R[]; problems: string[]; missing: string[] }
+export interface Parsed<R> { headers: string[]; sample: string[]; map: ColMap; rows: R[]; problems: string[]; missing: string[] }
 
 /** Pass `map` to use the TD's column picks; leave it out to guess from the headers. */
 export function readRoster(text: string, map?: ColMap): Parsed<RosterRow> {
   const grid = parseCsv(text);
   const headers = grid[0] ?? [];
   const col = map ?? guess(headers, ALIASES);
-  if (grid.length < 2) return { headers, map: col, rows: [], problems: [], missing: ['a header row and at least one student'] };
+  if (grid.length < 2) return { headers, sample: grid[1] ?? [], map: col, rows: [], problems: [], missing: ['a header row and at least one student'] };
   const has = (k: string) => col[k] !== undefined;
   const missing = [
     !has('name') && !(has('first') && has('last')) && 'student name',
     !has('grade') && 'grade',
     !has('school') && 'school',
   ].filter(Boolean) as string[];
-  if (missing.length) return { headers, map: col, rows: [], problems: [], missing };
+  if (missing.length) return { headers, sample: grid[1] ?? [], map: col, rows: [], problems: [], missing };
 
   const rows: RosterRow[] = [];
   const problems: string[] = [];
@@ -114,7 +119,7 @@ export function readRoster(text: string, map?: ColMap): Parsed<RosterRow> {
   });
   const ids = new Set<string>();
   for (const r of rows) if (r.student_id) { if (ids.has(r.student_id)) problems.push(`Student ID ${r.student_id} appears twice`); ids.add(r.student_id); }
-  return { headers, map: col, rows, problems, missing };
+  return { headers, sample: grid[1] ?? [], map: col, rows, problems, missing };
 }
 
 export interface CoachRow { name: string; email: string; phone: string | null; school: string }
@@ -135,9 +140,9 @@ export function readCoaches(text: string, map?: ColMap): Parsed<CoachRow> {
   const grid = parseCsv(text);
   const headers = grid[0] ?? [];
   const col = map ?? guess(headers, COACH_ALIASES);
-  if (grid.length < 2) return { headers, map: col, rows: [], problems: [], missing: ['a header row and at least one coach'] };
+  if (grid.length < 2) return { headers, sample: grid[1] ?? [], map: col, rows: [], problems: [], missing: ['a header row and at least one coach'] };
   const missing = ['name', 'email', 'school'].filter((k) => col[k] === undefined).map((k) => (k === 'name' ? 'coach name' : k));
-  if (missing.length) return { headers, map: col, rows: [], problems: [], missing };
+  if (missing.length) return { headers, sample: grid[1] ?? [], map: col, rows: [], problems: [], missing };
 
   const rows: CoachRow[] = [];
   const problems: string[] = [];
@@ -155,7 +160,7 @@ export function readCoaches(text: string, map?: ColMap): Parsed<CoachRow> {
     seen.add(email);
     rows.push({ name, email, phone: get('phone') || null, school });
   });
-  return { headers, map: col, rows, problems, missing };
+  return { headers, sample: grid[1] ?? [], map: col, rows, problems, missing };
 }
 
 /** One coach per email (falls back to name+school when the sheet has no email). */

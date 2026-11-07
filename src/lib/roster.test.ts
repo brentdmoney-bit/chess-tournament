@@ -74,3 +74,9 @@ test('closest school, district short names', () => {
   assert.equal(closestSchool('Bayles ES', schools), 'BAYLES');
   assert.equal(closestSchool('Black Elementary School', schools), 'BLACK');
 });
+
+test('loose header guesses and sample row', () => {
+  const r = readCoaches('Coach Full Name,Cell Phone Number,E-mail Address,School Name\nPat Smith,214-555-0100,p@example.org,North');
+  assert.deepEqual(r.map, { name: 0, phone: 1, email: 2, school: 3 });
+  assert.deepEqual(r.sample, ['Pat Smith', '214-555-0100', 'p@example.org', 'North']);
+});

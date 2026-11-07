@@ -49,21 +49,33 @@ export function newCode() {
 }
 
 /* ── Upload helpers: match the file's columns, match near-miss school names ─ */
-type Upload = { text: string; source: string; map: ColMap; fix: Record<string, string> };
+type Upload = { text: string; source: string; map: ColMap; fix: Record<string, string>; ok: boolean };
 
-function ColumnMatcher({ fields, headers, map, onChange }: { fields: CsvField[]; headers: string[]; map: ColMap; onChange: (m: ColMap) => void }) {
+/** One dropdown per website field, with the first row's value so the TD can see what lands where. Nothing saves until they confirm. */
+function ColumnMatcher({ fields, headers, sample, map, onChange, ok, onConfirm, blocked }: {
+  fields: CsvField[]; headers: string[]; sample: string[]; map: ColMap; onChange: (m: ColMap) => void; ok: boolean; onConfirm: () => void; blocked: boolean;
+}) {
   return (
     <div className="mt-3">
-      <p className="mb-2 text-sm font-semibold">Match columns</p>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {fields.map((f) => (
-          <Select key={f.key} label={f.label} value={map[f.key] ?? ''} className="min-h-9 text-sm"
-            onChange={(e) => onChange({ ...map, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) })}>
-            <option value="">Not in this file</option>
-            {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-          </Select>
-        ))}
+      <p className="mb-2 text-sm font-semibold">Match columns <span className="font-normal text-mute">(check each one against the sample from your first row)</span></p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {fields.map((f) => {
+          const i = map[f.key];
+          return (
+            <div key={f.key}>
+              <Select label={f.label} value={i ?? ''} className="min-h-9 text-sm"
+                onChange={(e) => onChange({ ...map, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) })}>
+                <option value="">Not in this file</option>
+                {headers.map((h, j) => <option key={j} value={j}>{h || `Column ${j + 1}`}</option>)}
+              </Select>
+              <p className="mt-1 truncate text-xs text-mute">{i === undefined ? '—' : <>e.g. <span className="text-ink">{sample[i] || '(blank)'}</span></>}</p>
+            </div>
+          );
+        })}
       </div>
+      {ok
+        ? <p className="mt-3 text-sm text-good">✓ Columns confirmed. Change any dropdown to re-check.</p>
+        : <Btn tone="info" className="mt-3" disabled={blocked} onClick={onConfirm}>Columns look right</Btn>}
     </div>
   );
 }
@@ -104,7 +116,7 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
   const [sheet, setSheet] = useState(t.sheet_url ?? '');
   const [add, setAdd] = useState<null | { first: string; last: string; grade: string; school: string; sid: string }>(null);
 
-  const load = (text: string, source: string) => setPreview({ text, source, map: readRoster(text).map, fix: {} });
+  const load = (text: string, source: string) => setPreview({ text, source, map: readRoster(text).map, fix: {}, ok: false });
   const parsed = preview ? readRoster(preview.text, preview.map) : null;
   const fixSchool = preview ? schoolFix(preview, s.schools) : (x: string) => x;
   const rowsOut = parsed ? parsed.rows.map((r) => ({ ...r, school: fixSchool(r.school) })) : [];
@@ -163,7 +175,10 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
             <p className="text-sm">{preview.source}: {parsed.missing.length
               ? <span className="text-warn">match these before importing: {parsed.missing.join(', ')}.</span>
               : <><b>{rowsOut.length}</b> students and <b>{coachesFrom(rowsOut).length}</b> coaches. Students already here (same ID) get updated, not duplicated.</>}</p>
-            <ColumnMatcher fields={ROSTER_FIELDS} headers={parsed.headers} map={preview.map} onChange={(map) => setPreview({ ...preview, map })} />
+            <ColumnMatcher fields={ROSTER_FIELDS} headers={parsed.headers} sample={parsed.sample} map={preview.map}
+              onChange={(map) => setPreview({ ...preview, map, ok: false })} ok={preview.ok} blocked={parsed.missing.length > 0}
+              onConfirm={() => setPreview({ ...preview, ok: true })} />
+            {preview.map.coach !== undefined && preview.map.coachPhone === undefined && <p className="mt-2 text-sm text-warn">No coach cell column matched: coaches from this file won't get texts.</p>}
             <SchoolMatcher names={parsed.rows.map((r) => r.school)} schools={s.schools} u={preview} keepLabel="New school (keep as typed)"
               onChange={(fix) => setPreview({ ...preview, fix })} />
             {parsed.problems.length > 0 && (
@@ -174,7 +189,7 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
               {rowsOut.length > 8 && <div>…and {rowsOut.length - 8} more</div>}
             </div>
             <div className="mt-3 flex gap-2">
-              <Btn tone="gold" disabled={busy === 'import' || !rowsOut.length} onClick={commit}>{busy === 'import' ? 'Importing…' : 'Import'}</Btn>
+              <Btn tone="gold" disabled={busy === 'import' || !rowsOut.length || !preview.ok} onClick={commit}>{busy === 'import' ? 'Importing…' : 'Import'}</Btn>
               <Btn onClick={() => setPreview(null)}>Cancel</Btn>
             </div>
           </div>
@@ -358,7 +373,7 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
                 const f = e.target.files?.[0]; e.target.value = '';
                 if (!f) return;
                 const text = await f.text();
-                setCoachCsv({ text, source: f.name, map: readCoaches(text).map, fix: {} });
+                setCoachCsv({ text, source: f.name, map: readCoaches(text).map, fix: {}, ok: false });
               }} />
             </label>
             {coachCsv && cParsed && (() => {
@@ -368,7 +383,10 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
                   <p>{coachCsv.source}: {cParsed.missing.length
                     ? <span className="text-warn">match these before saving: {cParsed.missing.join(', ')}.</span>
                     : <><b>{cRows.length}</b> coaches.</>}</p>
-                  <ColumnMatcher fields={COACH_FIELDS} headers={cParsed.headers} map={coachCsv.map} onChange={(map) => setCoachCsv({ ...coachCsv, map })} />
+                  <ColumnMatcher fields={COACH_FIELDS} headers={cParsed.headers} sample={cParsed.sample} map={coachCsv.map}
+                    onChange={(map) => setCoachCsv({ ...coachCsv, map, ok: false })} ok={coachCsv.ok} blocked={cParsed.missing.length > 0}
+                    onConfirm={() => setCoachCsv({ ...coachCsv, ok: true })} />
+                  {coachCsv.map.phone === undefined && <p className="mt-2 text-warn">No cell column matched: these coaches won't get pairing texts.</p>}
                   <SchoolMatcher names={cParsed.rows.map((c) => c.school)} schools={s.schools} u={coachCsv} keepLabel="No match (coach won't see any students)"
                     onChange={(fix) => setCoachCsv({ ...coachCsv, fix })} />
                   {kept.length > 0 && <p className="mt-2 text-warn">No students at: {kept.join(', ')}. Those coaches won't see any kids until the school matches.</p>}
@@ -380,7 +398,7 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
                     {cRows.length > 8 && <div>…and {cRows.length - 8} more</div>}
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <Btn tone="gold" disabled={busy === 'coachcsv' || !cRows.length} onClick={() => run('coachcsv', async () => {
+                    <Btn tone="gold" disabled={busy === 'coachcsv' || !cRows.length || !coachCsv.ok} onClick={() => run('coachcsv', async () => {
                       await must(supabase.from('coaches').upsert(cRows.map((c) => ({ ...c, tournament_id: t.id })), { onConflict: 'tournament_id,email' }));
                       setCoachCsv(null);
                     }, `Saved ${cRows.length} coaches`)}>{busy === 'coachcsv' ? 'Saving…' : 'Save coaches'}</Btn>
