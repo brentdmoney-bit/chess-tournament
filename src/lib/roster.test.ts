@@ -67,3 +67,10 @@ test('closest school', () => {
   assert.equal(closestSchool('Wilmer Hutchins HS', schools), 'Wilmer-Hutchins High School');
   assert.equal(closestSchool('Lincoln', schools), null);
 });
+
+test('closest school, district short names', () => {
+  const schools = ['ALEXANDER', 'BAYLES', 'BLACK', 'BLAIR'];
+  assert.equal(closestSchool('Alexander Elementary', schools), 'ALEXANDER');
+  assert.equal(closestSchool('Bayles ES', schools), 'BAYLES');
+  assert.equal(closestSchool('Black Elementary School', schools), 'BLACK');
+});

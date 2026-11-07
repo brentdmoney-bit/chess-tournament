@@ -170,7 +170,7 @@ export function coachesFrom(rows: RosterRow[]) {
 }
 
 const schoolKey = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ')} `
-  .replace(/ (high school|high|school|hs|h s|sr|senior|the|academy|campus) /g, ' ').replace(/\s+/g, '');
+  .replace(/ (high school|elementary school|middle school|high|school|elementary|elem|es|middle|ms|hs|h s|sr|senior|the|academy|campus|magnet) /g, ' ').replace(/\s+/g, '');
 const bigrams = (s: string) => { const b = new Map<string, number>(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); b.set(g, (b.get(g) ?? 0) + 1); } return b; };
 /** Closest roster school to a typed name ("Skyline HS" → "Skyline High School"), or null when nothing is close. */
 export function closestSchool(name: string, schools: string[]): string | null {
