@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { fullName, ordinal } from '../lib/chess.ts';
-import { COACH_FIELDS, ROSTER_FIELDS, closestSchool, coachesFrom, readCoaches, readRoster, type ColMap, type Field as CsvField } from '../lib/roster.ts';
+import { COACH_FIELDS, REG_FIELDS, ROSTER_FIELDS, closestSchool, coachesFrom, readCoaches, readRegSheet, readRoster, regTotals, type ColMap, type Field as CsvField } from '../lib/roster.ts';
 import { supabase, rpc, must, time, type Profile, type Role } from '../lib/supabase.ts';
 import type { TournamentState } from '../lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, Field, H1, Select, Shell, Table, Td, cx, useAction, useToast } from '../ui.tsx';
@@ -113,7 +113,11 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
   const [q, setQ] = useState('');
   const [grade, setGrade] = useState('');
   const [preview, setPreview] = useState<Upload | null>(null);
-  const [sheet, setSheet] = useState(t.sheet_url ?? '');
+  const [sheet, setSheet] = useState('');
+  useEffect(() => { // sheet links are TD-only secrets
+    void supabase.from('tournament_secrets').select('roster_sheet_url').eq('tournament_id', t.id).maybeSingle()
+      .then(({ data }) => setSheet(data?.roster_sheet_url ?? ''));
+  }, [t.id]);
   const [add, setAdd] = useState<null | { first: string; last: string; grade: string; school: string; sid: string }>(null);
 
   const load = (text: string, source: string) => setPreview({ text, source, map: readRoster(text).map, fix: {}, ok: false });
@@ -122,11 +126,9 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
   const rowsOut = parsed ? parsed.rows.map((r) => ({ ...r, school: fixSchool(r.school) })) : [];
 
   const fromSheet = () => run('sheet', async () => {
-    const { data, error } = await supabase.functions.invoke('fetch-sheet', { body: { url: sheet } });
-    if (error) throw new Error(`Couldn't read the sheet: ${error.message}`);
-    if (data?.error) throw new Error(data.error);
-    await must(supabase.from('tournaments').update({ sheet_url: sheet }).eq('id', t.id));
-    load(data.csv, 'Google Sheet');
+    const csv = await readSheet(sheet.trim());
+    await must(supabase.from('tournament_secrets').update({ roster_sheet_url: sheet.trim() }).eq('tournament_id', t.id));
+    load(csv, 'Google Sheet');
   });
 
   const commit = () => preview && run('import', async () => {
@@ -463,10 +465,10 @@ export function Settings({ s, toast }: { s: TournamentState; toast: Toast }) {
   const { busy, run } = useAction(toast);
   const [f, setF] = useState({
     name: t.name, event_date: t.event_date ?? '', location: t.location ?? '', total_rounds: t.total_rounds,
-    team_top_n: t.team_top_n, checkin_cutoff: toLocal(t.checkin_cutoff), reg_doc_url: t.reg_doc_url ?? '', active_grades: t.active_grades,
+    team_top_n: t.team_top_n, checkin_cutoff: toLocal(t.checkin_cutoff), active_grades: t.active_grades,
   });
   const save = () => run('save', () => must(supabase.from('tournaments').update({
-    ...f, event_date: f.event_date || null, reg_doc_url: f.reg_doc_url || null,
+    ...f, event_date: f.event_date || null,
     checkin_cutoff: f.checkin_cutoff ? new Date(f.checkin_cutoff).toISOString() : null,
     total_rounds: Math.max(f.total_rounds, t.current_round),
   }).eq('id', t.id)), 'Settings saved');
@@ -490,9 +492,9 @@ export function Settings({ s, toast }: { s: TournamentState; toast: Toast }) {
           <div className="space-y-3">
             <Field label="Check-in cutoff" type="datetime-local" value={f.checkin_cutoff} onChange={(e) => setF({ ...f, checkin_cutoff: e.target.value })}
               hint="After this, coaches can't mark attendance or add subs (they can still withdraw). The server enforces it." />
-            <Field label="Registration document link" value={f.reg_doc_url} onChange={(e) => setF({ ...f, reg_doc_url: e.target.value })} placeholder="https://docs.google.com/…" />
           </div>
         </Card>
+        <RegSheet s={s} toast={toast} />
         <Card title="Grades playing">
           <div className="flex flex-wrap gap-2">
             {GRADES.map((g) => {
@@ -521,5 +523,117 @@ export function Settings({ s, toast }: { s: TournamentState; toast: Toast }) {
         </Card>
       </div>
     </>
+  );
+}
+
+/* ── Registration sheet: per-school registered counts, re-read every minute ─ */
+async function readSheet(url: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('fetch-sheet', { body: { url } });
+  if (error) throw new Error(`Couldn't read the sheet: ${error.message}`);
+  if (data?.error) throw new Error(data.error);
+  return data.csv;
+}
+
+type RegCfg = { url: string; map?: ColMap; fix?: Record<string, string> };
+const regCountsFor = (csv: string, cfg: RegCfg, schools: string[]) => {
+  const p = readRegSheet(csv, cfg.map);
+  const u: Upload = { text: csv, source: '', map: p.map, fix: cfg.fix ?? {}, ok: true };
+  return { p, counts: regTotals(p.rows, schoolFix(u, schools)) };
+};
+
+/** Runs on the TD screen: re-reads the registration sheet every minute and stores the counts everyone sees. */
+export function useRegSync(s: TournamentState) {
+  const tid = s.t?.id;
+  const schoolsKey = s.schools.join('|');
+  useEffect(() => {
+    if (!tid) return;
+    const schools = schoolsKey ? schoolsKey.split('|') : [];
+    let stop = false;
+    const tick = async () => {
+      const { data } = await supabase.from('tournament_secrets').select('reg_sheet').eq('tournament_id', tid).maybeSingle();
+      const cfg = data?.reg_sheet as RegCfg | null;
+      if (stop || !cfg?.url || !cfg.map) return; // not set up, or columns never confirmed
+      try {
+        const { p, counts } = regCountsFor(await readSheet(cfg.url), cfg, schools);
+        if (!p.missing.length && !stop) await supabase.from('tournaments').update({ reg_counts: counts, reg_synced_at: new Date().toISOString() }).eq('id', tid);
+      } catch { /* sheet unreachable this minute: "last read" in Settings goes stale and the next tick retries */ }
+    };
+    void tick();
+    const timer = setInterval(tick, 60_000);
+    return () => { stop = true; clearInterval(timer); };
+  }, [tid, schoolsKey]);
+}
+
+function RegSheet({ s, toast }: { s: TournamentState; toast: Toast }) {
+  const t = s.t!;
+  const { busy, run } = useAction(toast);
+  const [cfg, setCfg] = useState<RegCfg | null>(null);
+  const [url, setUrl] = useState('');
+  const [u, setU] = useState<Upload | null>(null);
+  useEffect(() => {
+    void supabase.from('tournament_secrets').select('reg_sheet').eq('tournament_id', t.id).maybeSingle()
+      .then(({ data }) => { const c = (data?.reg_sheet ?? null) as RegCfg | null; setCfg(c); setUrl(c?.url ?? ''); });
+  }, [t.id]);
+
+  const parsed = u ? readRegSheet(u.text, u.map) : null;
+  const counts = u && parsed && !parsed.missing.length ? regTotals(parsed.rows, schoolFix(u, s.schools)) : {};
+  const matched = Object.entries(counts).filter(([k]) => s.schools.includes(k)).sort();
+  const live = t.reg_counts ? Object.values(t.reg_counts).reduce((a, b) => a + b, 0) : 0;
+
+  const read = () => run('regread', async () => {
+    const csv = await readSheet(url.trim());
+    const same = cfg?.url === url.trim() && cfg.map ? cfg : null;
+    setU({ text: csv, source: 'Registration sheet', map: same?.map ?? readRegSheet(csv).map, fix: same?.fix ?? {}, ok: false });
+  });
+  const save = () => u && run('regsave', async () => {
+    const next: RegCfg = { url: url.trim(), map: u.map, fix: u.fix };
+    await must(supabase.from('tournament_secrets').update({ reg_sheet: next }).eq('tournament_id', t.id));
+    await must(supabase.from('tournaments').update({ reg_counts: counts, reg_synced_at: new Date().toISOString() }).eq('id', t.id));
+    setCfg(next); setU(null);
+  }, 'Saved. Registered counts now update every minute.');
+  const stopSync = () => run('regstop', async () => {
+    await must(supabase.from('tournament_secrets').update({ reg_sheet: null }).eq('tournament_id', t.id));
+    await must(supabase.from('tournaments').update({ reg_counts: null, reg_synced_at: null }).eq('id', t.id));
+    setCfg(null); setUrl(''); setU(null);
+  }, 'Stopped syncing');
+
+  return (
+    <Card title="Registration sheet" className="lg:col-span-2">
+      <p className="mb-2 text-sm text-mute">The Google Sheet the registration table fills in. Sharing: “Anyone with the link can view”. Only directors can see this link.</p>
+      <div className="flex gap-2">
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…"
+          className="min-h-11 min-w-0 flex-1 rounded-xl border border-line bg-panel-2 px-3 outline-none focus:border-gold" />
+        <Btn tone="gold" disabled={!url.trim() || busy === 'regread'} onClick={read}>{busy === 'regread' ? 'Reading…' : cfg?.map ? 'Re-match columns' : 'Read sheet'}</Btn>
+      </div>
+      {cfg?.map && !u && (
+        <p className="mt-2 text-sm">
+          {t.reg_synced_at ? <>Syncing every minute while a director screen is open. Last read {time(t.reg_synced_at)}: <b>{live}</b> registered.</> : 'Waiting for the first read…'}
+          <button className="ml-2 text-xs text-bad underline" disabled={busy === 'regstop'} onClick={stopSync}>stop syncing</button>
+        </p>
+      )}
+      {u && parsed && (
+        <div className="mt-3 rounded-xl border border-gold/40 p-3 text-sm">
+          {parsed.missing.length > 0 && <p className="text-warn">Match these first: {parsed.missing.join(', ')}.</p>}
+          <ColumnMatcher fields={REG_FIELDS} headers={parsed.headers} sample={parsed.sample} map={u.map}
+            onChange={(map) => setU({ ...u, map, ok: false })} ok={u.ok} blocked={parsed.missing.length > 0}
+            onConfirm={() => setU({ ...u, ok: true })} />
+          <SchoolMatcher names={parsed.rows.map((r) => r.school)} schools={s.schools} u={u} keepLabel="Not a roster school (ignored)"
+            onChange={(fix) => setU({ ...u, fix, ok: false })} />
+          {parsed.problems.length > 0 && (
+            <details className="mt-2 text-warn"><summary>{parsed.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{parsed.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
+          )}
+          {!parsed.missing.length && (
+            <p className="mt-2 text-xs text-mute">
+              {u.map.count === undefined ? 'Counting one row per student. ' : ''}
+              {matched.length} schools, {matched.reduce((a, [, n]) => a + n, 0)} registered: {matched.slice(0, 6).map(([k, n]) => `${k} ${n}`).join(' · ')}{matched.length > 6 ? ' …' : ''}
+            </p>
+          )}
+          <div className="mt-3 flex gap-2">
+            <Btn tone="gold" disabled={busy === 'regsave' || !u.ok || parsed.missing.length > 0} onClick={save}>{busy === 'regsave' ? 'Saving…' : 'Save and sync'}</Btn>
+            <Btn onClick={() => setU(null)}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

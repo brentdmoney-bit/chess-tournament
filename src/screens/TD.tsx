@@ -4,13 +4,14 @@ import { supabase, rpc, must, type Profile } from '../lib/supabase.ts';
 import { useTournament, type TournamentState } from '../lib/useTournament.ts';
 import { Attendance, Awards, Chat, PairingsTable, Progress, Results, StandingsView } from '../panels.tsx';
 import { Overview } from './SA.tsx';
-import { Access, CreateTournament, Players, Scorers, Settings } from './TDSetup.tsx';
+import { Access, CreateTournament, Players, Scorers, Settings, useRegSync } from './TDSetup.tsx';
 import { Badge, Btn, Card, Empty, ErrorBar, H1, Shell, Stat, cx, useAction, useToast } from '../ui.tsx';
 
 type Toast = (m: string, bad?: boolean) => void;
 
 export default function TD({ profile, onSignOut }: { profile: Profile; onSignOut: () => void }) {
   const s = useTournament('TD');
+  useRegSync(s); // keeps Attendance's Registered column in step with the registration sheet
   const { toast, node } = useToast();
   const [tab, setTab] = useState('show');
   const t = s.t;

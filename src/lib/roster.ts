@@ -191,3 +191,43 @@ export function closestSchool(name: string, schools: string[]): string | null {
   }
   return top >= 0.6 ? best : null;
 }
+
+/* ── Registration sheet: registered count per school ───────────────────── */
+export const REG_FIELDS: Field[] = [
+  { key: 'school', label: 'School' },
+  { key: 'count', label: 'Registered count (not in file = count one row per student)' },
+];
+const REG_ALIASES: Record<string, string[]> = {
+  school: ['school', 'campus', 'schoolname'],
+  count: ['registeredcount', 'registered', 'studentcount', 'numberofstudents', 'students', 'count', 'total', 'regd'],
+};
+
+/** Rows of {school as typed, count}. With no count column, each row counts as one student. */
+export function readRegSheet(text: string, map?: ColMap): Parsed<{ school: string; n: number }> {
+  const grid = parseCsv(text);
+  const headers = grid[0] ?? [];
+  const col = map ?? guess(headers, REG_ALIASES);
+  const base = { headers, sample: grid[1] ?? [], map: col };
+  if (grid.length < 2) return { ...base, rows: [], problems: [], missing: ['a header row and at least one row'] };
+  if (col.school === undefined) return { ...base, rows: [], problems: [], missing: ['school'] };
+  const rows: { school: string; n: number }[] = [];
+  const problems: string[] = [];
+  grid.slice(1).forEach((r, i) => {
+    const school = (r[col.school!] ?? '').replace(/^\d+\s*-\s*/, '').trim();
+    if (!school) return;
+    if (col.count === undefined) return rows.push({ school, n: 1 });
+    const raw = (r[col.count] ?? '').trim();
+    if (!raw) return;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) return problems.push(`Line ${i + 2}: count "${raw}" isn't a whole number`);
+    rows.push({ school, n });
+  });
+  return { ...base, rows, problems, missing: [] };
+}
+
+/** Sum counts per school after mapping sheet names to roster names. */
+export function regTotals(rows: { school: string; n: number }[], fix: (s: string) => string) {
+  const out: Record<string, number> = {};
+  for (const r of rows) { const k = fix(r.school); out[k] = (out[k] ?? 0) + r.n; }
+  return out;
+}

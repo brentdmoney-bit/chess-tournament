@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, readRoster, readCoaches, coachesFrom, splitName, closestSchool } from './roster.ts';
+import { parseCsv, readRoster, readCoaches, coachesFrom, splitName, closestSchool, readRegSheet, regTotals } from './roster.ts';
 
 test('coach list CSV', () => {
   const csv = [
@@ -79,4 +79,14 @@ test('loose header guesses and sample row', () => {
   const r = readCoaches('Coach Full Name,Cell Phone Number,E-mail Address,School Name\nPat Smith,214-555-0100,p@example.org,North');
   assert.deepEqual(r.map, { name: 0, phone: 1, email: 2, school: 3 });
   assert.deepEqual(r.sample, ['Pat Smith', '214-555-0100', 'p@example.org', 'North']);
+});
+
+test('registration sheet counts', () => {
+  const perCoach = readRegSheet(['Coach,Campus,# Registered', 'A,001 - ALEXANDER,5', 'B,ALEXANDER,3', 'C,Bayles ES,x', 'D,,2'].join('\n'));
+  assert.deepEqual(perCoach.map, { school: 1, count: 2 });
+  assert.equal(perCoach.problems.length, 1);
+  assert.deepEqual(regTotals(perCoach.rows, (x) => closestSchool(x, ['ALEXANDER', 'BAYLES']) ?? x), { ALEXANDER: 8 });
+  const perStudent = readRegSheet(['Student,School', 'Ann,BAYLES', 'Bo,Bayles ES', 'Cy,ALEXANDER'].join('\n'));
+  assert.equal(perStudent.map.count, undefined);
+  assert.deepEqual(regTotals(perStudent.rows, (x) => closestSchool(x, ['ALEXANDER', 'BAYLES']) ?? x), { BAYLES: 2, ALEXANDER: 1 });
 });

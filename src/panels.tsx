@@ -339,10 +339,14 @@ export function Awards({ s, canEdit, toast }: { s: TournamentState; canEdit: boo
 /* ── Attendance by school (TD edits, SA views) ─────────────────────────── */
 export function Attendance({ s, canEdit, toast }: { s: TournamentState; canEdit: boolean; toast: Toast }) {
   const { busy, run } = useAction(toast);
+  const [regLink, setRegLink] = useState<string | null>(null);
+  useEffect(() => { rpc<string | null>('reg_sheet_url').then(setRegLink).catch(() => setRegLink(null)); }, []);
+  const fromSheet = s.t?.reg_counts ?? null; // set while the registration sheet sync is on
   const rows = s.schools.map((school) => {
     const roster = s.players.filter((p) => p.school === school);
     const coaches = s.coaches.filter((c) => c.school === school && c.approved);
-    const reg = coaches.reduce<number | null>((a, c) => (c.registered_count == null ? a : (a ?? 0) + c.registered_count), null);
+    const reg = fromSheet ? fromSheet[school] ?? 0
+      : coaches.reduce<number | null>((a, c) => (c.registered_count == null ? a : (a ?? 0) + c.registered_count), null);
     const present = roster.filter((p) => p.status === 'present').length;
     return { school, roster: roster.length, present, coaches, reg };
   });
@@ -351,8 +355,8 @@ export function Attendance({ s, canEdit, toast }: { s: TournamentState; canEdit:
 
   return (
     <>
-      <H1 sub="Registered = count from the registration table. Competing = students their coach marked present."
-        action={s.t?.reg_doc_url && <a className="text-sm text-info underline" href={s.t.reg_doc_url} target="_blank" rel="noopener noreferrer">Registration doc ↗</a>}>Attendance</H1>
+      <H1 sub={`Registered = ${fromSheet ? `registration sheet, last read ${s.t?.reg_synced_at ? time(s.t.reg_synced_at) : '—'}` : 'typed in by the director'}. Competing = students their coach marked present.`}
+        action={regLink && <a className="text-sm text-info underline" href={regLink} target="_blank" rel="noopener noreferrer">Registration sheet ↗</a>}>Attendance</H1>
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Coaches here" value={`${coachesIn}/${s.coaches.filter((c) => c.approved).length}`} />
         <Stat label="On roster" value={tot.roster} />
@@ -383,7 +387,7 @@ export function Attendance({ s, canEdit, toast }: { s: TournamentState; canEdit:
                   ))}
                 </Td>
                 <Td>
-                  {canEdit && first ? (
+                  {canEdit && first && !fromSheet ? (
                     <input key={`${first.id}-${first.registered_count}`} type="number" min={0} inputMode="numeric" defaultValue={first.registered_count ?? ''} placeholder="—"
                       className="w-20 rounded-lg border border-line bg-panel-2 px-2 py-1"
                       onBlur={(e) => {

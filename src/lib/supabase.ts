@@ -16,7 +16,8 @@ export interface Tournament {
   id: string; name: string; event_date: string | null; location: string | null;
   total_rounds: number; current_round: number; round_phase: Phase;
   checkin_cutoff: string | null; active_grades: number[]; award_tiers: AwardTier[];
-  team_top_n: number; reg_doc_url: string | null; sheet_url: string | null; ended: boolean;
+  team_top_n: number; ended: boolean;
+  reg_counts: Record<string, number> | null; reg_synced_at: string | null; // from the registration sheet sync
 }
 export interface Coach {
   id: string; name: string; email: string | null; phone: string | null; school: string;
