@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { fullName, ordinal } from '../lib/chess.ts';
-import { coachesFrom, readCoaches, readRoster, type CoachRow, type RosterRow } from '../lib/roster.ts';
+import { COACH_FIELDS, ROSTER_FIELDS, closestSchool, coachesFrom, readCoaches, readRoster, type ColMap, type Field as CsvField } from '../lib/roster.ts';
 import { supabase, rpc, must, time, type Profile, type Role } from '../lib/supabase.ts';
 import type { TournamentState } from '../lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, Field, H1, Select, Shell, Table, Td, cx, useAction, useToast } from '../ui.tsx';
@@ -48,21 +48,66 @@ export function newCode() {
   return [...b].map((x) => CODE_CHARS[x % CODE_CHARS.length]).join('');
 }
 
+/* ── Upload helpers: match the file's columns, match near-miss school names ─ */
+type Upload = { text: string; source: string; map: ColMap; fix: Record<string, string> };
+
+function ColumnMatcher({ fields, headers, map, onChange }: { fields: CsvField[]; headers: string[]; map: ColMap; onChange: (m: ColMap) => void }) {
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-sm font-semibold">Match columns</p>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {fields.map((f) => (
+          <Select key={f.key} label={f.label} value={map[f.key] ?? ''} className="min-h-9 text-sm"
+            onChange={(e) => onChange({ ...map, [f.key]: e.target.value === '' ? undefined : Number(e.target.value) })}>
+            <option value="">Not in this file</option>
+            {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+          </Select>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Each school in the file that isn't spelled exactly like a roster school → which roster school it is ('' = keep as typed). */
+const schoolFix = (u: Upload, schools: string[]) => (name: string) =>
+  schools.includes(name) ? name : (u.fix[name] ?? closestSchool(name, schools) ?? '') || name;
+
+function SchoolMatcher({ names, schools, u, onChange, keepLabel }: { names: string[]; schools: string[]; u: Upload; onChange: (fix: Record<string, string>) => void; keepLabel: string }) {
+  const odd = [...new Set(names)].filter((n) => !schools.includes(n)).sort();
+  if (!schools.length || !odd.length) return null;
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-sm font-semibold">Match schools <span className="font-normal text-mute">({odd.length} don't match the roster exactly; best guess is picked)</span></p>
+      <div className="max-h-72 space-y-2 overflow-y-auto">
+        {odd.map((n) => (
+          <div key={n} className="grid items-center gap-2 sm:grid-cols-2">
+            <span className="text-sm">{n}</span>
+            <Select value={u.fix[n] ?? closestSchool(n, schools) ?? ''} className="min-h-9 text-sm"
+              onChange={(e) => onChange({ ...u.fix, [n]: e.target.value })}>
+              <option value="">{keepLabel}</option>
+              {schools.map((x) => <option key={x} value={x}>{x}</option>)}
+            </Select>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Players: roster table, manual add, CSV / Google Sheet import ───────── */
 export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
   const t = s.t!;
   const { busy, run } = useAction(toast);
   const [q, setQ] = useState('');
   const [grade, setGrade] = useState('');
-  const [preview, setPreview] = useState<{ rows: RosterRow[]; problems: string[]; source: string } | null>(null);
+  const [preview, setPreview] = useState<Upload | null>(null);
   const [sheet, setSheet] = useState(t.sheet_url ?? '');
   const [add, setAdd] = useState<null | { first: string; last: string; grade: string; school: string; sid: string }>(null);
 
-  const load = (text: string, source: string) => {
-    const r = readRoster(text);
-    if (r.missing.length) return toast(`That roster is missing: ${r.missing.join(', ')}.`, true);
-    setPreview({ rows: r.rows, problems: r.problems, source });
-  };
+  const load = (text: string, source: string) => setPreview({ text, source, map: readRoster(text).map, fix: {} });
+  const parsed = preview ? readRoster(preview.text, preview.map) : null;
+  const fixSchool = preview ? schoolFix(preview, s.schools) : (x: string) => x;
+  const rowsOut = parsed ? parsed.rows.map((r) => ({ ...r, school: fixSchool(r.school) })) : [];
 
   const fromSheet = () => run('sheet', async () => {
     const { data, error } = await supabase.functions.invoke('fetch-sheet', { body: { url: sheet } });
@@ -73,18 +118,18 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
   });
 
   const commit = () => preview && run('import', async () => {
-    const rows = preview.rows.map((r) => ({
+    const rows = rowsOut.map((r) => ({
       student_id: r.student_id, first_name: r.first_name, last_name: r.last_name,
       grade: r.grade, school: r.school, coach_name: r.coach_name,
     }));
     // Server upserts on student ID so re-importing never duplicates or wipes check-in status.
     await rpc('import_players', { p_rows: rows });
-    const withEmail = coachesFrom(preview.rows).filter((c) => c.email).map((c) => ({ ...c, tournament_id: t.id }));
+    const withEmail = coachesFrom(rowsOut).filter((c) => c.email).map((c) => ({ ...c, tournament_id: t.id }));
     if (withEmail.length) await must(supabase.from('coaches').upsert(withEmail, { onConflict: 'tournament_id,email' }));
     const grades = [...new Set([...t.active_grades, ...rows.map((r) => r.grade)])].sort((a, b) => a - b);
     await must(supabase.from('tournaments').update({ active_grades: grades }).eq('id', t.id));
     setPreview(null);
-  }, `Imported ${preview.rows.length} students`);
+  }, `Imported ${rowsOut.length} students`);
 
   const list = s.players.filter((p) => (!grade || p.grade === Number(grade)) &&
     (!q || `${fullName(p)} ${p.school} ${p.student_id ?? ''}`.toLowerCase().includes(q.toLowerCase())));
@@ -113,18 +158,23 @@ export function Players({ s, toast }: { s: TournamentState; toast: Toast }) {
             </label>
           </div>
         </div>
-        {preview && (
+        {preview && parsed && (
           <div className="mt-4 rounded-xl border border-gold/40 p-3">
-            <p className="text-sm"><b>{preview.rows.length}</b> students and <b>{coachesFrom(preview.rows).length}</b> coaches from {preview.source}. Students already here (same ID) get updated, not duplicated.</p>
-            {preview.problems.length > 0 && (
-              <details className="mt-2 text-sm text-warn"><summary>{preview.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{preview.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
+            <p className="text-sm">{preview.source}: {parsed.missing.length
+              ? <span className="text-warn">match these before importing: {parsed.missing.join(', ')}.</span>
+              : <><b>{rowsOut.length}</b> students and <b>{coachesFrom(rowsOut).length}</b> coaches. Students already here (same ID) get updated, not duplicated.</>}</p>
+            <ColumnMatcher fields={ROSTER_FIELDS} headers={parsed.headers} map={preview.map} onChange={(map) => setPreview({ ...preview, map })} />
+            <SchoolMatcher names={parsed.rows.map((r) => r.school)} schools={s.schools} u={preview} keepLabel="New school (keep as typed)"
+              onChange={(fix) => setPreview({ ...preview, fix })} />
+            {parsed.problems.length > 0 && (
+              <details className="mt-2 text-sm text-warn"><summary>{parsed.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{parsed.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
             )}
             <div className="mt-2 max-h-56 overflow-y-auto text-xs text-mute">
-              {preview.rows.slice(0, 8).map((r, i) => <div key={i}>{r.first_name} {r.last_name} · {ordinal(r.grade)} · {r.school} · {r.coach_name ?? 'no coach'}</div>)}
-              {preview.rows.length > 8 && <div>…and {preview.rows.length - 8} more</div>}
+              {rowsOut.slice(0, 8).map((r, i) => <div key={i}>{r.first_name} {r.last_name} · {ordinal(r.grade)} · {r.school} · {r.coach_name ?? 'no coach'}</div>)}
+              {rowsOut.length > 8 && <div>…and {rowsOut.length - 8} more</div>}
             </div>
             <div className="mt-3 flex gap-2">
-              <Btn tone="gold" disabled={busy === 'import' || !preview.rows.length} onClick={commit}>{busy === 'import' ? 'Importing…' : 'Import'}</Btn>
+              <Btn tone="gold" disabled={busy === 'import' || !rowsOut.length} onClick={commit}>{busy === 'import' ? 'Importing…' : 'Import'}</Btn>
               <Btn onClick={() => setPreview(null)}>Cancel</Btn>
             </div>
           </div>
@@ -197,7 +247,10 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
   const [inv, setInv] = useState({ email: '', role: 'Admin' as Role });
   const [coach, setCoach] = useState({ name: '', email: '', phone: '', school: '' });
   const [schoolFor, setSchoolFor] = useState<Record<string, string>>({});
-  const [coachCsv, setCoachCsv] = useState<{ rows: CoachRow[]; problems: string[]; source: string } | null>(null);
+  const [coachCsv, setCoachCsv] = useState<Upload | null>(null);
+  const cParsed = coachCsv ? readCoaches(coachCsv.text, coachCsv.map) : null;
+  const cFix = coachCsv ? schoolFix(coachCsv, s.schools) : (x: string) => x;
+  const cRows = cParsed ? cParsed.rows.map((c) => ({ ...c, school: cFix(c.school) })) : [];
 
   const reload = async () => {
     const [p, i] = await Promise.all([
@@ -304,29 +357,33 @@ export function Access({ s, toast }: { s: TournamentState; toast: Toast }) {
               <input type="file" accept=".csv,.txt,text/csv" className="hidden" onChange={async (e) => {
                 const f = e.target.files?.[0]; e.target.value = '';
                 if (!f) return;
-                const r = readCoaches(await f.text());
-                if (r.missing.length) return toast(`That file is missing: ${r.missing.join(', ')}.`, true);
-                setCoachCsv({ rows: r.rows, problems: r.problems, source: f.name });
+                const text = await f.text();
+                setCoachCsv({ text, source: f.name, map: readCoaches(text).map, fix: {} });
               }} />
             </label>
-            {coachCsv && (() => {
-              const unknown = s.schools.length ? [...new Set(coachCsv.rows.map((c) => c.school))].filter((x) => !s.schools.includes(x)) : [];
+            {coachCsv && cParsed && (() => {
+              const kept = s.schools.length ? [...new Set(cRows.map((c) => c.school))].filter((x) => !s.schools.includes(x)) : [];
               return (
                 <div className="mt-3 rounded-xl border border-gold/40 p-3 text-sm">
-                  <p><b>{coachCsv.rows.length}</b> coaches from {coachCsv.source}.</p>
-                  {unknown.length > 0 && <p className="mt-1 text-warn">No students at: {unknown.join(', ')}. Fix the spelling to match the student roster, or those coaches won't see any kids.</p>}
-                  {coachCsv.problems.length > 0 && (
-                    <details className="mt-1 text-warn"><summary>{coachCsv.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{coachCsv.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
+                  <p>{coachCsv.source}: {cParsed.missing.length
+                    ? <span className="text-warn">match these before saving: {cParsed.missing.join(', ')}.</span>
+                    : <><b>{cRows.length}</b> coaches.</>}</p>
+                  <ColumnMatcher fields={COACH_FIELDS} headers={cParsed.headers} map={coachCsv.map} onChange={(map) => setCoachCsv({ ...coachCsv, map })} />
+                  <SchoolMatcher names={cParsed.rows.map((c) => c.school)} schools={s.schools} u={coachCsv} keepLabel="No match (coach won't see any students)"
+                    onChange={(fix) => setCoachCsv({ ...coachCsv, fix })} />
+                  {kept.length > 0 && <p className="mt-2 text-warn">No students at: {kept.join(', ')}. Those coaches won't see any kids until the school matches.</p>}
+                  {cParsed.problems.length > 0 && (
+                    <details className="mt-1 text-warn"><summary>{cParsed.problems.length} rows skipped</summary><ul className="mt-1 list-disc pl-5">{cParsed.problems.slice(0, 50).map((p) => <li key={p}>{p}</li>)}</ul></details>
                   )}
                   <div className="mt-2 max-h-40 overflow-y-auto text-xs text-mute">
-                    {coachCsv.rows.slice(0, 8).map((c) => <div key={c.email}>{c.name} · {c.school} · {c.phone ?? 'no cell'}</div>)}
-                    {coachCsv.rows.length > 8 && <div>…and {coachCsv.rows.length - 8} more</div>}
+                    {cRows.slice(0, 8).map((c) => <div key={c.email}>{c.name} · {c.school} · {c.phone ?? 'no cell'}</div>)}
+                    {cRows.length > 8 && <div>…and {cRows.length - 8} more</div>}
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <Btn tone="gold" disabled={busy === 'coachcsv' || !coachCsv.rows.length} onClick={() => run('coachcsv', async () => {
-                      await must(supabase.from('coaches').upsert(coachCsv.rows.map((c) => ({ ...c, tournament_id: t.id })), { onConflict: 'tournament_id,email' }));
+                    <Btn tone="gold" disabled={busy === 'coachcsv' || !cRows.length} onClick={() => run('coachcsv', async () => {
+                      await must(supabase.from('coaches').upsert(cRows.map((c) => ({ ...c, tournament_id: t.id })), { onConflict: 'tournament_id,email' }));
                       setCoachCsv(null);
-                    }, `Saved ${coachCsv.rows.length} coaches`)}>{busy === 'coachcsv' ? 'Saving…' : 'Save coaches'}</Btn>
+                    }, `Saved ${cRows.length} coaches`)}>{busy === 'coachcsv' ? 'Saving…' : 'Save coaches'}</Btn>
                     <Btn onClick={() => setCoachCsv(null)}>Cancel</Btn>
                   </div>
                 </div>

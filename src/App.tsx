@@ -10,6 +10,32 @@ import Scorer from './screens/Scorer.tsx';
 import SA from './screens/SA.tsx';
 
 export default function App() {
+  return <><UpdateBanner /><Routes /></>;
+}
+
+declare const __BUILD_ID__: string;
+/** Shows a bar with a hard-refresh button once a newer build is live. Checks every minute and when the tab wakes. */
+function UpdateBanner() {
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    const check = () => fetch('/version.json', { cache: 'no-store' })
+      .then((r) => r.json()).then((v) => { if (v.id && v.id !== __BUILD_ID__) setStale(true); }).catch(() => {});
+    const onWake = () => { if (document.visibilityState === 'visible') void check(); };
+    const timer = setInterval(check, 60_000);
+    document.addEventListener('visibilitychange', onWake);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onWake); };
+  }, []);
+  if (!stale) return null;
+  return (
+    <div role="status" className="sticky top-0 z-[60] flex items-center justify-center gap-3 bg-gold px-4 py-2 text-sm font-semibold text-gold-ink">
+      A new version is ready.
+      <button onClick={() => window.location.reload()} className="min-h-9 rounded-lg bg-gold-ink px-3 text-gold">Refresh now</button>
+    </div>
+  );
+}
+
+function Routes() {
   useTheme(); // applies the saved theme before any screen renders
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [profile, setProfile] = useState<Profile | null>(null);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCsv, readRoster, readCoaches, coachesFrom, splitName } from './roster.ts';
+import { parseCsv, readRoster, readCoaches, coachesFrom, splitName, closestSchool } from './roster.ts';
 
 test('coach list CSV', () => {
   const csv = [
@@ -48,4 +48,22 @@ test('first/last columns and missing headers', () => {
   assert.equal(r.rows[0].last_name, 'Lee');
   assert.deepEqual(readRoster('Name,School\nx,y').missing, ['grade']);
   assert.deepEqual(splitName('Mary Ann Smith'), ['Mary Ann', 'Smith']);
+});
+
+test('column picks override guesses', () => {
+  const csv = 'Kid,Yr,Building\nAnn Lee,9,North';
+  assert.deepEqual(readRoster(csv).missing, ['student name', 'grade', 'school']);
+  const r = readRoster(csv, { name: 0, grade: 1, school: 2 });
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.rows[0].last_name, 'Lee');
+  assert.deepEqual(r.headers, ['Kid', 'Yr', 'Building']);
+});
+
+test('closest school', () => {
+  const schools = ['Skyline High School', 'Sunset High School', 'W. T. White High School', 'Wilmer-Hutchins High School'];
+  assert.equal(closestSchool('Skyline HS', schools), 'Skyline High School');
+  assert.equal(closestSchool('skyline', schools), 'Skyline High School');
+  assert.equal(closestSchool('WT White', schools), 'W. T. White High School');
+  assert.equal(closestSchool('Wilmer Hutchins HS', schools), 'Wilmer-Hutchins High School');
+  assert.equal(closestSchool('Lincoln', schools), null);
 });

@@ -39,6 +39,30 @@ const ALIASES: Record<string, string[]> = {
   school: ['school', 'campus', 'schoolname'],
 };
 
+/** Column picks: field key → column index (undefined = not in this file). */
+export type ColMap = Record<string, number | undefined>;
+export interface Field { key: string; label: string }
+
+export const ROSTER_FIELDS: Field[] = [
+  { key: 'studentId', label: 'Student ID' }, { key: 'name', label: 'Student name (one column)' },
+  { key: 'first', label: 'First name' }, { key: 'last', label: 'Last name' },
+  { key: 'grade', label: 'Grade' }, { key: 'school', label: 'School' },
+  { key: 'coach', label: 'Coach name' }, { key: 'coachPhone', label: 'Coach cell' }, { key: 'coachEmail', label: 'Coach email' },
+];
+
+function guess(headers: string[], aliases: Record<string, string[]>): ColMap {
+  const head = headers.map(norm);
+  const col: ColMap = {};
+  const used = new Set<number>();
+  for (const [key, names] of Object.entries(aliases)) {
+    for (const n of names) {
+      const i = head.findIndex((h, idx) => !used.has(idx) && h === n);
+      if (i >= 0) { col[key] = i; used.add(i); break; }
+    }
+  }
+  return col;
+}
+
 const title = (s: string) => s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\s+/g, ' ').trim();
 /** "Last, First Middle" → [First Middle, Last]; "First Last" → [First, Last]. */
 export function splitName(s: string): [string, string] {
@@ -52,30 +76,27 @@ export interface RosterRow {
   coach_name: string | null; coach_email: string | null; coach_phone: string | null;
 }
 
-export function readRoster(text: string): { rows: RosterRow[]; problems: string[]; missing: string[] } {
+export interface Parsed<R> { headers: string[]; map: ColMap; rows: R[]; problems: string[]; missing: string[] }
+
+/** Pass `map` to use the TD's column picks; leave it out to guess from the headers. */
+export function readRoster(text: string, map?: ColMap): Parsed<RosterRow> {
   const grid = parseCsv(text);
-  if (grid.length < 2) return { rows: [], problems: [], missing: ['a header row and at least one student'] };
-  const head = grid[0].map(norm);
-  const col: Record<string, number> = {};
-  const used = new Set<number>();
-  for (const [key, names] of Object.entries(ALIASES)) {
-    for (const n of names) {
-      const i = head.findIndex((h, idx) => !used.has(idx) && h === n);
-      if (i >= 0) { col[key] = i; used.add(i); break; }
-    }
-  }
+  const headers = grid[0] ?? [];
+  const col = map ?? guess(headers, ALIASES);
+  if (grid.length < 2) return { headers, map: col, rows: [], problems: [], missing: ['a header row and at least one student'] };
+  const has = (k: string) => col[k] !== undefined;
   const missing = [
-    !('name' in col) && !('first' in col && 'last' in col) && 'student name',
-    !('grade' in col) && 'grade',
-    !('school' in col) && 'school',
+    !has('name') && !(has('first') && has('last')) && 'student name',
+    !has('grade') && 'grade',
+    !has('school') && 'school',
   ].filter(Boolean) as string[];
-  if (missing.length) return { rows: [], problems: [], missing };
+  if (missing.length) return { headers, map: col, rows: [], problems: [], missing };
 
   const rows: RosterRow[] = [];
   const problems: string[] = [];
   grid.slice(1).forEach((r, i) => {
     const get = (k: string) => (col[k] === undefined ? '' : r[col[k]] ?? '');
-    const [first, last] = 'first' in col ? [title(get('first')), title(get('last'))] : splitName(get('name'));
+    const [first, last] = has('first') && has('last') ? [title(get('first')), title(get('last'))] : splitName(get('name'));
     const grade = parseInt(get('grade'), 10);
     const school = get('school').replace(/^\d+\s*-\s*/, '').trim();
     const line = i + 2;
@@ -93,7 +114,7 @@ export function readRoster(text: string): { rows: RosterRow[]; problems: string[
   });
   const ids = new Set<string>();
   for (const r of rows) if (r.student_id) { if (ids.has(r.student_id)) problems.push(`Student ID ${r.student_id} appears twice`); ids.add(r.student_id); }
-  return { rows, problems, missing };
+  return { headers, map: col, rows, problems, missing };
 }
 
 export interface CoachRow { name: string; email: string; phone: string | null; school: string }
@@ -105,21 +126,18 @@ const COACH_ALIASES: Record<string, string[]> = {
   school: ['school', 'campus', 'schoolname'],
 };
 
+export const COACH_FIELDS: Field[] = [
+  { key: 'name', label: 'Coach name' }, { key: 'phone', label: 'Cell' }, { key: 'email', label: 'Email' }, { key: 'school', label: 'School' },
+];
+
 /** Coach list CSV: name, cell, email, school. One row per coach; email is how they sign in. */
-export function readCoaches(text: string): { rows: CoachRow[]; problems: string[]; missing: string[] } {
+export function readCoaches(text: string, map?: ColMap): Parsed<CoachRow> {
   const grid = parseCsv(text);
-  if (grid.length < 2) return { rows: [], problems: [], missing: ['a header row and at least one coach'] };
-  const head = grid[0].map(norm);
-  const col: Record<string, number> = {};
-  const used = new Set<number>();
-  for (const [key, names] of Object.entries(COACH_ALIASES)) {
-    for (const n of names) {
-      const i = head.findIndex((h, idx) => !used.has(idx) && h === n);
-      if (i >= 0) { col[key] = i; used.add(i); break; }
-    }
-  }
-  const missing = ['name', 'email', 'school'].filter((k) => !(k in col)).map((k) => (k === 'name' ? 'coach name' : k));
-  if (missing.length) return { rows: [], problems: [], missing };
+  const headers = grid[0] ?? [];
+  const col = map ?? guess(headers, COACH_ALIASES);
+  if (grid.length < 2) return { headers, map: col, rows: [], problems: [], missing: ['a header row and at least one coach'] };
+  const missing = ['name', 'email', 'school'].filter((k) => col[k] === undefined).map((k) => (k === 'name' ? 'coach name' : k));
+  if (missing.length) return { headers, map: col, rows: [], problems: [], missing };
 
   const rows: CoachRow[] = [];
   const problems: string[] = [];
@@ -137,7 +155,7 @@ export function readCoaches(text: string): { rows: CoachRow[]; problems: string[
     seen.add(email);
     rows.push({ name, email, phone: get('phone') || null, school });
   });
-  return { rows, problems, missing };
+  return { headers, map: col, rows, problems, missing };
 }
 
 /** One coach per email (falls back to name+school when the sheet has no email). */
@@ -149,4 +167,22 @@ export function coachesFrom(rows: RosterRow[]) {
     if (!m.has(key)) m.set(key, { name: r.coach_name ?? r.coach_email!, email: r.coach_email, phone: r.coach_phone, school: r.school });
   }
   return [...m.values()];
+}
+
+const schoolKey = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ')} `
+  .replace(/ (high school|high|school|hs|h s|sr|senior|the|academy|campus) /g, ' ').replace(/\s+/g, '');
+const bigrams = (s: string) => { const b = new Map<string, number>(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); b.set(g, (b.get(g) ?? 0) + 1); } return b; };
+/** Closest roster school to a typed name ("Skyline HS" → "Skyline High School"), or null when nothing is close. */
+export function closestSchool(name: string, schools: string[]): string | null {
+  const k = schoolKey(name);
+  let best: string | null = null, top = 0;
+  for (const s of schools) {
+    const sk = schoolKey(s);
+    if (sk === k) return s;
+    const a = bigrams(k), b = bigrams(sk);
+    let both = 0; for (const [g, n] of a) both += Math.min(n, b.get(g) ?? 0);
+    const score = (2 * both) / Math.max(1, k.length - 1 + sk.length - 1);
+    if (score > top) { top = score; best = s; }
+  }
+  return top >= 0.6 ? best : null;
 }
