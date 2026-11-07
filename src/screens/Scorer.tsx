@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { RESULT_LABEL, fullName, points, type Result } from '../lib/chess.ts';
+import { RESULT_LABEL, fullName, ordinal, points, type Result } from '../lib/chess.ts';
 import { supabase, rpc, type DbGame, type Profile } from '../lib/supabase.ts';
 import { useTournament } from '../lib/useTournament.ts';
 import { Badge, Btn, Card, Empty, ErrorBar, H1, Shell, cx, useAction, useToast } from '../ui.tsx';
@@ -26,7 +26,6 @@ export default function Scorer({ profile, onSignOut }: { profile: Profile; onSig
   const open = t && (t.round_phase === 'published' || t.round_phase === 'locked');
   const games = s.roundGames.filter((g) => g.black_id);
   const game = games.find((g) => g.id === boardId) ?? null;
-  const done = games.filter((g) => g.result).length;
 
   const back = () => { setBoardId(null); setPick(null); setOverwrite(false); setNote(''); setLookup(''); setTimeout(() => boardInput.current?.focus(), 0); };
   const choose = (g: DbGame) => { setBoardId(g.id); setPick(null); setOverwrite(false); setErr(''); };
@@ -80,7 +79,7 @@ export default function Scorer({ profile, onSignOut }: { profile: Profile; onSig
         <Empty>Round {t.current_round} pairings aren't posted yet. This screen updates by itself.</Empty>
       ) : !game ? (
         <div className="mx-auto max-w-lg">
-          <H1 sub={`${done} of ${games.length} boards scored · type a board number and press Enter`}>Score a board</H1>
+          <H1 sub="Type a board number and press Enter">Score a board</H1>
           <form className="mb-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (lookup) findBoard(); }}>
             <input ref={boardInput} autoFocus inputMode="numeric" enterKeyHint="go" aria-label="Board number" value={lookup}
               onChange={(e) => { setLookup(e.target.value.replace(/\D/g, '')); setErr(''); }} placeholder="Board #"
@@ -88,6 +87,7 @@ export default function Scorer({ profile, onSignOut }: { profile: Profile; onSig
             <Btn tone="gold" big disabled={!lookup}>Go</Btn>
           </form>
           <p className={cx('mb-4 min-h-5 text-center text-sm', err ? 'text-bad' : 'text-mute')}>{err || ' '}</p>
+          <ScoreBoard games={games} />
           <details className="text-sm">
             <summary className="cursor-pointer text-mute">Or tap a board</summary>
             <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-8">
@@ -164,6 +164,49 @@ export default function Scorer({ profile, onSignOut }: { profile: Profile; onSig
       )}
       {node}
     </Shell>
+  );
+}
+
+/** Live progress for the round: totals, per grade, and which boards are still out. */
+function ScoreBoard({ games }: { games: DbGame[] }) {
+  const left = games.filter((g) => !g.result);
+  const grades = [...new Set(games.map((g) => g.grade))].sort((a, b) => a - b);
+  return (
+    <div className="mb-4 space-y-3">
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {[['Boards', games.length, ''], ['Scored', games.length - left.length, 'text-good'], ['Left', left.length, left.length ? 'text-warn' : 'text-good']].map(([label, n, tone]) => (
+          <div key={label as string} className="rounded-xl border border-line bg-panel p-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-mute">{label}</div>
+            <div className={cx('text-2xl font-bold', tone as string)}>{n}</div>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
+        {grades.map((gr) => {
+          const all = games.filter((g) => g.grade === gr), out = all.filter((g) => !g.result);
+          return (
+            <div key={gr} className="flex items-center gap-3 text-sm">
+              <span className="w-10 font-semibold">{ordinal(gr)}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-panel-2">
+                <div className="h-full bg-good" style={{ width: `${all.length ? ((all.length - out.length) / all.length) * 100 : 0}%` }} />
+              </div>
+              <span className={cx('w-24 text-right', out.length ? 'text-warn' : 'text-good')}>{out.length ? `${out.length} of ${all.length} left` : 'all done'}</span>
+            </div>
+          );
+        })}
+      </div>
+      {left.length > 0 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-mute">Unscored boards ({left.length})</summary>
+          <div className="mt-2 space-y-1">
+            {grades.map((gr) => {
+              const out = left.filter((g) => g.grade === gr);
+              return out.length ? <div key={gr}><span className="font-semibold">{ordinal(gr)}:</span> <span className="text-mute">{out.map((g) => g.board).join(', ')}</span></div> : null;
+            })}
+          </div>
+        </details>
+      )}
+    </div>
   );
 }
 

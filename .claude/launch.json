@@ -1,6 +1,27 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "chess-dev", "runtimeExecutable": "npx", "runtimeArgs": ["vite", "--port", "5179"], "port": 5179 }
+    {
+      "name": "chess-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5179"
+      ],
+      "port": 5179
+    },
+    {
+      "name": "chess-live-data",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--mode",
+        "production",
+        "--port",
+        "5180"
+      ],
+      "port": 5180
+    }
   ]
 }

@@ -30,7 +30,7 @@ function UpdateBanner() {
   return (
     <div role="status" className="sticky top-0 z-[60] flex items-center justify-center gap-3 bg-gold px-4 py-2 text-sm font-semibold text-gold-ink">
       A new version is ready.
-      <button onClick={() => window.location.reload()} className="min-h-9 rounded-lg bg-gold-ink px-3 text-gold">Refresh now</button>
+      <button onClick={() => window.location.reload()} className="min-h-9 rounded-lg bg-neutral-900 px-3 font-bold text-white">Refresh now</button>
     </div>
   );
 }

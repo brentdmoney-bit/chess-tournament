@@ -66,7 +66,9 @@ export function useTournament(role: Role) {
   useEffect(() => {
     let tid: string | null = null;
     const tables: Table[] = ['tournaments', 'players', 'coaches', 'games', 'help_requests', 'messages', 'notices', 'access_requests'];
-    const channel = supabase.channel('tournament-live');
+    // Unique name per mount: removing an old channel also drops any newer one with the same topic,
+    // which silently killed live updates after a remount (React strict mode, tab switches).
+    const channel = supabase.channel(`tournament-live-${crypto.randomUUID()}`);
     for (const table of tables) {
       channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => { if (tid) void load(table, tid); });
     }
